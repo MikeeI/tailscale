@@ -210,9 +210,9 @@ Next finding ID: ISSUE-2026-075
 
 ### ISSUE-2026-009 — testwrapper: Shard discovery failures become successful skips
 
-- Status: Drafted.
+- Status: Published.
 - Delivery mode: Issue.
-- Location: Not published.
+- Location: https://github.com/tailscale/tailscale/issues/20797
 - Evidence class: Observed and source-proven; CI occurrence frequency not measured.
 - Internal priority: High.
 - Confidence: High.
@@ -246,8 +246,8 @@ Next finding ID: ISSUE-2026-075
 - Verification: The current binary returned zero for invalid syntax, an out-of-range shard, and failed `go list`.
   A source overlay returned non-zero with diagnostics for those failure classes.
   The same overlay preserved success for a valid empty shard.
-- Missing publication evidence: Exact user approval of the completed bug-form draft and the official
-  `tailscale/tailscale` new-issue target.
+- Missing publication evidence: None.
+  Published as https://github.com/tailscale/tailscale/issues/20797 after exact draft and target approval.
 
 ### ISSUE-2026-010 — Makefile: SSH integration prerequisites and build failures are backgrounded
 
