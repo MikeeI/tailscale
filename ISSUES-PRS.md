@@ -4,7 +4,7 @@ This file is the sole source of truth for every finding's ID, delivery mode, lif
 Read and update this ledger instead of inferring state from chat history, clone reports, or earlier reviews.
 `FORMAT.md` owns research, drafting, implementation authorization, approval, and publication rules.
 
-Next finding ID: ISSUE-2026-075
+Next finding ID: ISSUE-2026-181
 
 ### ISSUE-2026-001 — ipnlocal: Extension shutdown skips its drain window
 
@@ -892,28 +892,30 @@ Next finding ID: ISSUE-2026-075
 - Verification: If reopened, use a failing writer for both JSON commands and confirm error propagation.
 - Missing publication evidence: Recurrent consumer pain and prior-art research are missing.
 
-### ISSUE-2026-035 — netstack: Rejected TCP flows remain in packetsInFlight
+### ISSUE-2026-035 — netstack: Rejected TCP flows retain pre-admission state
 
 - Status: Hold.
 - Delivery mode: Undecided.
 - Location: Not published.
-- Evidence class: Source-proven growth path; production impact not measured.
+- Evidence class: Source-proven retained flow keys and addresses; production impact not measured.
 - Internal priority: High.
 - Confidence: High.
 - Type: Networking and lifecycle.
 - Publication target: Undecided.
-- Summary: `wrapTCP` inserts a flow key before admission and returns on overload without deleting it.
-  Rejected unique flows can therefore accumulate in `packetsInFlight`.
-- Evidence: `wgengine/netstack/netstack.go:542-571` inserts before the `tooMany` return.
-  Cleanup is installed only in later paths at lines 584-610.
-- Shared change pressure: Not a DRY finding; one admission owner must pair map insertion and cleanup.
-- Impact: Source proves retained keys for rejected flows.
-  Trigger rate, retained bytes, and production memory impact are not measured.
-- Proposed direction: Insert only after successful admission or delete immediately on rejection.
-- Risks and boundaries: Never decrement counters that the rejected path did not increment.
+- Summary: `wrapTCP` acquires a flow key and dynamic subnet address before forwarder admission.
+  A rejected path can bypass the handlers that own cleanup for either resource.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `wgengine/netstack/netstack.go:514-601,1551-1556` acquires both resources before admission.
+  GVisor can report `handled=true` without starting the handler that installs cleanup.
+- Shared change pressure: One admission owner must pair every pre-admission acquisition with release.
+- Impact: Rejected unique flows can retain map keys and dynamic subnet addresses.
+  Trigger rate, retained bytes, address pressure, and production impact are not measured.
+- Proposed direction: Acquire resources only after admission or release each one on every rejected return.
+- Risks and boundaries: Never decrement counters or release resources that the rejected path did not acquire.
   Preserve per-client and global admission semantics.
-- Verification: Send unique rejected TCP flows and assert bounded map cardinality after every return.
-- Missing publication evidence: Record the exact current `upstream/main` revision and reproduce the growth.
+- Verification: Exercise malformed SYN, overload, and GVisor in-flight rejection paths.
+  Assert bounded map cardinality and zero retained dynamic addresses after each rejection.
+- Missing publication evidence: Reproduce both retained-state paths on the recorded current revision.
   Search prior Netstack admission and SYN-flood issues.
 
 ### ISSUE-2026-036 — magicsock: Non-relay peer aliases grow without an owner policy
@@ -1857,3 +1859,2553 @@ Next finding ID: ISSUE-2026-075
   The current checked-in test does not cover delta removal followed by a fresh cache load.
 - Missing publication evidence: None.
   Published as https://github.com/tailscale/tailscale/issues/20796 after exact draft and target approval.
+
+### ISSUE-2026-075 — derper: Rate limiting terminates the entire DERP service during load spikes
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: The listener must reject only excess connections and continue serving.
+  Instead, `errLimitedConn` ends `ServeTLS`, after which `main` calls `Fatalf`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/derper/derper.go:477-527`.
+  `net/http` retries temporary `net.Error` failures, not plain error values.
+- Shared change pressure: Not a DRY finding; `cmd/derper/derper.go` owns listener error classification.
+- Impact: Source proves a load spike can end the DERP process and disconnect all relay connections.
+  The production frequency of such termination is unmeasured.
+- Proposed direction: Return rejections as temporary network errors so the listener continues serving.
+- Risks and boundaries: The fix must preserve per-connection rejection while retaining listener ownership and cleanup.
+- Verification: A focused test should exhaust a burst and then complete HTTPS against the same running process.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior derper issues and pull requests for the same root cause.
+
+### ISSUE-2026-076 — osrouter: Empty OpenBSD configuration leaves all prior router state active
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: `Set(nil)` and empty configurations must remove all router state.
+  Instead, an early return skips every removal and reports success.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `wgengine/router/osrouter/router_openbsd.go:85-93`.
+  Production reset paths pass exactly this empty configuration to the OpenBSD router.
+- Shared change pressure: Not a DRY finding; the OpenBSD router owns empty-configuration reset behavior.
+- Impact: Source proves addresses, routes, and bypass state remain active after a reported successful reset.
+  The production frequency and duration of retained state are unmeasured.
+- Proposed direction: Let empty configurations proceed through the existing complete removal path.
+- Risks and boundaries: The fix must preserve OpenBSD cleanup ordering and remove only router-managed state.
+- Verification: A focused test should configure and clear the router, then inspect all kernel routes and addresses.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior osrouter issues and pull requests for the same root cause.
+
+### ISSUE-2026-077 — osrouter: Failed OpenBSD routes remain permanently recorded as applied
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: The cache must describe only successfully applied kernel state.
+  Instead, address and route caches update even after commands fail.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `wgengine/router/osrouter/router_openbsd.go:112-246`.
+  The next identical `Set` therefore skips the failed operations.
+- Shared change pressure: Not a DRY finding; the OpenBSD router owns applied-state cache commits.
+- Impact: Source proves missing or stale kernel routes can survive identical retry attempts.
+  The production frequency and persistence of divergence are unmeasured.
+- Proposed direction: Commit each cache entry to its target state only after that operation succeeds.
+- Risks and boundaries: The fix must preserve partial-success state and keep failed operations retryable.
+- Verification: A focused test should fail a route command and confirm an identical `Set` retries it.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior osrouter issues and pull requests for the same root cause.
+
+### ISSUE-2026-078 — osrouter: Failed OpenBSD bypass setup is marked successful
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Default-route bypass state must be set only after successful routing-table setup.
+  Instead, an error is only logged and `areDefaultRoute` is still set to true.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `wgengine/router/osrouter/router_openbsd.go:256-264`.
+  Identical later configurations then skip the required bypass setup entirely.
+- Shared change pressure: Not a DRY finding; the OpenBSD router owns default-route bypass state transitions.
+- Impact: Source proves system and control connections can incorrectly follow the Tailscale default route.
+  The production frequency of incorrect routing is unmeasured.
+- Proposed direction: Return the setup error and set success state only after bypass setup succeeds.
+- Risks and boundaries: The fix must preserve prior bypass state on failure and keep setup retryable.
+- Verification: A focused test should fail bypass setup and confirm a retry attempts it again and reports the error.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior osrouter issues and pull requests for the same root cause.
+
+### ISSUE-2026-079 — osrouter: BSD routers store failed routes as current state
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: The route cache must reflect successfully applied Darwin and FreeBSD routes.
+  Instead, `r.routes` receives the target state despite add or delete errors.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `wgengine/router/osrouter/router_userspace_bsd.go:163-204`.
+  Equivalent later calls see no difference and skip repair.
+- Shared change pressure: Not a DRY finding; the userspace BSD router owns route-cache convergence.
+- Impact: Source proves missing or unwanted routes can remain without another repair attempt.
+  The production frequency and duration of stale routes are unmeasured.
+- Proposed direction: Update the cache separately for successful and failed route operations.
+- Risks and boundaries: The fix must preserve partial add and delete successes on Darwin and FreeBSD.
+- Verification: A focused test should fail add and delete separately and confirm identical calls retry both.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior osrouter issues and pull requests for the same root cause.
+
+### ISSUE-2026-080 — controlbase: Cancellation after HTTP upgrade does not stop the Noise handshake
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: The dial context must bound the full connection setup until return.
+  Instead, after status 101, the blocking Noise handshake ignores `ctx.Done`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `control/controlbase/handshake.go:120-155`.
+  `io.ReadFull` has only an absolute deadline, with no cancellation-to-close transition.
+- Shared change pressure: Not a DRY finding; `controlbase` owns cancellation during the Noise handshake.
+- Impact: Source proves canceled control connections can block until the deadline or indefinitely.
+  The production frequency and blocking duration are unmeasured.
+- Proposed direction: Observe context cancellation during the handshake and close the underlying connection.
+- Risks and boundaries: Preserve deadlines and make concurrent cancellation close the socket once.
+- Verification: A focused test should cancel after status 101 and expect prompt return with the socket closed.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-081 — derper: DERP WebSocket setup loses cancellation and socket ownership
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven under js or ts_debug_websockets builds; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Cancellation must terminate setup of a WebSocket-based DERP connection.
+  Instead, setup uses `context.Background` after the WebSocket dial.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `derp/derphttp/derphttp_client.go:338-467`.
+  The source closes nil `tcpConn`; build reachability exists only with js or ts_debug_websockets.
+- Shared change pressure: Not a DRY finding; the DERP HTTP client owns WebSocket setup context and socket cleanup.
+- Impact: Source proves a missing DERP greeting can retain Close, a mutex, a goroutine, and a socket.
+  The production effect is unmeasured outside js or ts_debug_websockets builds.
+- Proposed direction: Bind setup to the WebSocket context and fully close resources on pre-setup errors.
+- Risks and boundaries: Preserve socket ownership and avoid double-close on cancellation or setup failure.
+- Verification: A focused test should withhold the DERP greeting and expect cancellation to close setup and the peer.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior derper issues and pull requests for the same root cause.
+
+### ISSUE-2026-082 — netmon: Windows network monitor can block forever during close
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Platform correctness.
+- Publication target: Undecided.
+- Summary: `Monitor.Close` must stop operating-system callbacks without reciprocal locking.
+  Instead, Close holds `Monitor.mu` while Unregister waits for a callback.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `net/netmon/netmon.go:509-531; net/netmon/netmon_windows.go:77-190`.
+  The callback needs the same mutex through `isActive`, creating lock inversion.
+- Shared change pressure: Not a DRY finding; the Windows network monitor owns callback unregistration order.
+- Impact: Source proves the Windows daemon can wait forever for a callback during shutdown.
+  The production frequency of this deadlock is unmeasured.
+- Proposed direction: Unregister the operating-system monitor outside `Monitor.mu`, then finalize state.
+- Risks and boundaries: The fix must preserve callback concurrency and prevent callbacks from observing finalized state.
+- Verification: A focused test should pause a callback in `isActive` and confirm concurrent Close completes.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior netmon issues and pull requests for the same root cause.
+
+### ISSUE-2026-083 — tsdial: PeerAPI-free builds panic on every dialer close
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Platform correctness.
+- Publication target: Undecided.
+- Summary: Feature-omit tags must produce runnable binaries without removed components.
+  Instead, `Close` unconditionally invokes the intentionally panicking PeerAPI stub.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `net/tsdial/tsdial.go:192-208,713-735`.
+  `feature/buildfeatures` marks PeerAPI absent, but the call remains.
+- Shared change pressure: Not a DRY finding; `tsdial.Close` owns shutdown dispatch for optional PeerAPI support.
+- Impact: Source proves `ts_omit_peerapiclient` binaries panic during normal `tsnet` shutdown.
+  The production use and frequency of this build variant are unmeasured.
+- Proposed direction: Call `CloseIdleConnections` only when `HasPeerAPIClient` is active.
+- Risks and boundaries: The fix must preserve normal PeerAPI cleanup and the `ts_omit_peerapiclient` build boundary.
+- Verification: A focused test should build with `ts_omit_peerapiclient` and normally close a `tsnet.Server`.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tsdial issues and pull requests for the same root cause.
+
+### ISSUE-2026-084 — netstack: SOCKS proxy drops responses after a valid client half-close
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: EOF in one TCP direction must allow the opposite direction to finish.
+  Instead, the first completed `io.Copy` immediately closes both connections.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `net/socks5/socks5.go:245-260`.
+  `io.Copy` returns nil on client EOF while the server response transfer remains incomplete.
+- Shared change pressure: Not a DRY finding; the SOCKS5 proxy owns bidirectional TCP copy completion.
+- Impact: Source proves request-response protocols can lose replies after the client closes its write side.
+  The production frequency and amount of lost response data are unmeasured.
+- Proposed direction: Half-close each write side as appropriate and wait for both copy directions.
+- Risks and boundaries: The fix must preserve full-duplex concurrency, half-close semantics, and final socket cleanup.
+- Verification: A focused test should make the backend reply after EOF and expect the client to receive it all.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior netstack issues and pull requests for the same root cause.
+
+### ISSUE-2026-085 — controlbase: Failed logout locally clears the active control key
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: A failed logout must preserve the prior session and its node key.
+  `TryLogout` clears `c.persist` regardless of the returned error.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `control/controlclient/direct.go:547-557`.
+  Auto and LocalBackend retain profile and key state in parallel, allowing divergence.
+- Shared change pressure: Not a DRY finding; `TryLogout` owns the logout transaction and persisted client state.
+- Impact: A network error makes the same control client unusable for later logout attempts.
+  The production frequency of this failure is unmeasured.
+- Proposed direction: Commit the empty persistence view only after logout succeeds.
+- Risks and boundaries: Preserve the prior session and node key on every failed logout path.
+- Verification: Fail one logout, verify the key remains, then complete a second attempt successfully.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-086 — derper: Conn25 shutdown permits spin loops and send-on-closed-channel panics
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Shutdown must stop consumers and safely reject later producers.
+  The work channel closes while producers can still send to it.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `feature/conn25/conn25.go:336-344,954-990`.
+  The consumer omits the receive `ok` check and processes endless zero values.
+- Shared change pressure: Not a DRY finding; the Conn25 extension owns work admission and shutdown sequencing.
+- Impact: Concurrent shutdown can panic the daemon or flood CPU and logs.
+  The production incidence of either outcome is unmeasured.
+- Proposed direction: Cancel only through context and synchronize producer admission with shutdown.
+- Risks and boundaries: Keep producer admission and consumer cancellation race-free during shutdown.
+- Verification: Deterministically interleave assignment and shutdown; require neither panic nor spin.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior derper issues and pull requests for the same root cause.
+
+### ISSUE-2026-087 — k8s-operator: Failed auth-key update blocks all later reissuance
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Reconcile errors must retry until the Secret is updated.
+  The in-flight marker is set before the failing Secret commit.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/k8s-operator/proxygroup.go:914-1034; tsrecorder.go:478-535`.
+  The next reconcile sees the marker and refuses the required retry.
+- Shared change pressure: Not a DRY finding; the auth-key reconciler owns marker publication after Secret commit.
+- Impact: ProxyGroups and recorders remain unauthenticated after a Secret update failure.
+  The production frequency of this state is unmeasured.
+- Proposed direction: Set the marker only after a successful update, or clear it on every error.
+- Risks and boundaries: Preserve retryability across Secret conflicts without enabling duplicate in-flight work.
+- Verification: Inject a Secret conflict; the next reconcile must retry auth-key reissuance.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior k8s-operator issues and pull requests for the same root cause.
+
+### ISSUE-2026-088 — k8s-operator: Nil endpoint conditions repeatedly panic the readiness controller
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven panic path; controller-runtime recovery and production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Platform correctness.
+- Publication target: Undecided.
+- Summary: Nil EndpointSlice conditions must use Kubernetes-defined defaults.
+  `Ready`, `Serving`, and `Terminating` are dereferenced unconditionally.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/k8s-operator/egress-services-readiness.go:180-225`.
+  Another production reconciler temporarily writes these condition pointers as nil.
+- Shared change pressure: Not a DRY finding; the readiness controller owns EndpointSlice condition interpretation.
+- Impact: Egress readiness remains indeterminate while the controller repeatedly panics and requeues.
+  `controller-runtime` recovers the panics; no operator-process crash is claimed.
+- Proposed direction: Evaluate every condition nil-safely using the Kubernetes defaults.
+- Risks and boundaries: Preserve Kubernetes semantics for all nil and non-nil condition combinations.
+- Verification: Reconcile an EndpointSlice with all three conditions nil and check correct readiness.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior k8s-operator issues and pull requests for the same root cause.
+
+### ISSUE-2026-089 — k8s-operator: Current ProxyGroup lookup prevents cleanup of former owners
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Deletion, annotation removal, and owner changes must clean up the former owner.
+  A missing current ProxyGroup entry ends reconcile before any cleanup.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/k8s-operator/ingress-for-pg.go:118-145; svc-for-pg.go:100-135`.
+  The former owner is neither stored nor rediscovered through the current indexes.
+- Shared change pressure: Not a DRY finding; the reconciler owns former-owner identity and cleanup ordering.
+- Impact: Finalizers, certificates, RBAC, and old serve configurations remain indefinitely.
+  The production prevalence of these leftovers is unmeasured.
+- Proposed direction: Persist the last owner and clean it up before the current ProxyGroup lookup.
+- Risks and boundaries: Preserve ownership boundaries while cleaning deletion, annotation removal, and owner changes.
+- Verification: Remove the annotation, delete the ProxyGroup, and change owners; old resources must disappear.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior k8s-operator issues and pull requests for the same root cause.
+
+### ISSUE-2026-090 — containerboot: Container reaper masks every unsuccessful tailscaled exit
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: CLI correctness.
+- Publication target: Undecided.
+- Summary: Daemon failures must trigger the documented crash loop and container restart.
+  The reaper discards `WaitStatus` and calls `os.Exit(0)` unconditionally.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/containerboot/main.go:983-995`.
+  The complete exit status is available but is not evaluated before process termination.
+- Shared change pressure: Not a DRY finding; the container reaper owns child-status propagation to container exit.
+- Impact: A fatal `tailscaled` failure incorrectly ends the container with status zero.
+  The production frequency of masked failures is unmeasured.
+- Proposed direction: Propagate normal nonzero exits and signal-caused failures as nonzero status.
+- Risks and boundaries: Preserve successful zero exits while mapping normal and signaled failures correctly.
+- Verification: Exit the child with status 17; containerboot must also report failure.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior containerboot issues and pull requests for the same root cause.
+
+### ISSUE-2026-091 — containerboot: Initial ProxyGroup status patch terminates containerboot with an error
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Platform correctness.
+- Publication target: Undecided.
+- Summary: The first status write must create a missing Secret key.
+  JSON Patch `replace` requires the data member to exist already.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/containerboot/egressservices.go:411-453; ingressservices.go:145-202`.
+  The operator template initially creates the state Secret with no `Data` at all.
+- Shared change pressure: Not a DRY finding; containerboot owns creation of the first ProxyGroup status member.
+- Impact: New ingress or egress ProxyGroups crash-loop before their first status report.
+  The production frequency of this startup failure is unmeasured.
+- Proposed direction: Create missing members with `add` or a strategic data patch.
+- Risks and boundaries: Preserve updates to existing status keys while supporting a Secret with no `Data`.
+- Verification: Apply the first patch to a fresh state Secret without a status key; it must succeed.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior containerboot issues and pull requests for the same root cause.
+
+### ISSUE-2026-092 — tsdial: Windows proxy cache survives requested network invalidation
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven stale-cache path; network-change reachability is conditional.
+- Internal priority: Medium.
+- Confidence: Medium.
+- Type: Platform correctness.
+- Publication target: Undecided.
+- Summary: A network change must invalidate every dependent proxy decision.
+  The hook clears only backoff state, not `cachedProxy.val`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `net/tshttpproxy/tshttpproxy_windows.go:80-119`.
+  After a WinHTTP timeout, the old proxy is returned with a nil error.
+- Shared change pressure: Not a DRY finding; the Windows proxy cache owns proxy invalidation across network changes.
+- Impact: Roaming can keep sending control traffic to an unreachable old proxy.
+  Network-change reachability is conditional, and production effect is unmeasured.
+- Proposed direction: Invalidate the platform cache and generation-guard results from late old requests.
+- Risks and boundaries: Prevent late requests from restoring stale state, and bound any proposed wait with a timeout.
+- Verification: Cache proxy P1, trigger a network change, and exclude P1 after a timeout-bounded check.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tsdial issues and pull requests for the same root cause.
+
+### ISSUE-2026-093 — controlbase: AppConnector commits routes before successful backend application
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Persisted RouteInfo must describe routes successfully applied by the backend.
+  The queue, event, and cache advance before the backend result is known.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `appc/appconnector.go:353-397`.
+  Backend errors are only logged; the same route state then takes an early return.
+- Shared change pressure: Not a DRY finding; AppConnector owns the commit boundary between desired and applied routes.
+- Impact: Failed DNS routes are persisted and never repaired by identical updates.
+  The production frequency of unrepaired routes is unmeasured.
+- Proposed direction: Commit only after confirmed backend application and keep failed work retryable.
+- Risks and boundaries: Preserve route ordering and retryability without committing failed backend work.
+- Verification: Make `AdvertiseRoute` fail; an identical later update must attempt application again.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-094 — controlbase: Stale AppConnector events mutate the newly selected profile
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Profile switches must isolate all profile-bound routes and persisted data.
+  Events lack a generation, and the connector is reused across profile switches.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `ipn/ipnlocal/local.go:730-753,8333-8373,8588-8627`.
+  Callback processing always targets the profile current at execution time.
+- Shared change pressure: Not a DRY finding; LocalBackend owns profile generation and AppConnector lifecycle.
+- Impact: Profile A can write routes or RouteInfo into profile B.
+  The production frequency of cross-profile mutation is unmeasured.
+- Proposed direction: Carry the profile generation, drop stale work, and recreate the connector on profile change.
+- Risks and boundaries: Preserve profile isolation while canceling stale asynchronous work during switches.
+- Verification: Pause an event across a profile switch; profile B must remain unchanged afterward.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-095 — controlbase: Concurrent AWS state writes can permanently overwrite newer data
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Concurrent `StateStore` writes must be safe and retain every successful write.
+  Export and `PutParameter` run outside one shared write lock, allowing an older snapshot to win.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `ipn/store/awsstore/store_aws.go:224-264`.
+  A delayed write A can commit after newer write B and replace B's confirmed state.
+- Shared change pressure: Not a DRY finding; AWS `StateStore` commit ordering is the single decision owner.
+- Impact: Source proves that an older SSM snapshot can overwrite newer confirmed state.
+  Production frequency and scale are unmeasured.
+- Proposed direction: Serialize the full export-and-put operation, or use a conditional versioned commit.
+- Risks and boundaries: Preserve concurrency safety and prevent stale commits without losing successful writes.
+- Verification: Control the order of two writes; remote state must contain both changes.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-096 — controlbase: EditPrefs confirms changes after durable storage fails
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: `EditPrefs` must return an error when requested changes cannot be applied.
+  `pm.SetPrefs` errors are only logged and hidden behind HTTP 200.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `ipn/ipnlocal/local.go:5427-5551`.
+  Memory changes before the failed store write, and that state blocks a retry.
+- Shared change pressure: Not a DRY finding; `EditPrefs` commit handling is the single decision owner.
+- Impact: Source proves that clients see success although restart can lose the accepted configuration.
+  Production frequency and scale are unmeasured.
+- Proposed direction: Propagate persistence errors through the public API and roll back failed commits.
+- Risks and boundaries: Keep in-memory and durable preferences aligned across failures and retries.
+- Verification: Force a `StateStore` write failure; `EditPrefs` must return an error instead of success.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-097 — tailssh: New SSH connection escapes server shutdown
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Shutdown must close every accepted SSH connection, including connections still being established.
+  The shutdown check and insertion into `activeConns` are not atomic.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `ssh/tailssh/tailssh.go:132-192,472-481`.
+  Shutdown can close an empty map and return between the check and registration.
+- Shared change pressure: Not a DRY finding; SSH connection registration is the single decision owner.
+- Impact: Source proves that a connection can continue handshake and forwarding after shutdown completes.
+  Production frequency and scale are unmeasured.
+- Proposed direction: Lock the shutdown gate with registration, and immediately close the losing socket.
+- Risks and boundaries: Preserve connection ownership, shutdown ordering, and socket cleanup under concurrency.
+- Verification: Pause before the map insert; shutdown must not return before the socket closes.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tailssh issues and pull requests for the same root cause.
+
+### ISSUE-2026-098 — tailssh: Blocking control notification delays mandatory SSH enforcement
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Recording failures must immediately trigger the configured rejection or termination.
+  An unbounded synchronous notification runs before the required policy action.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `ssh/tailssh/tailssh.go:1453-1501,1574-1585`.
+  The Noise HTTP client has no timeout while response headers are withheld.
+- Shared change pressure: Not a DRY finding; SSH recording-policy enforcement order is the single decision owner.
+- Impact: Source proves that an unrecorded session can continue despite reject or terminate policy.
+  Production frequency and scale are unmeasured.
+- Proposed direction: Enforce first, then decouple notification with its own deadline context.
+- Risks and boundaries: Preserve reject and terminate semantics while bounding notification concurrency and cleanup.
+- Verification: Block the control response; the session must still be rejected or terminated immediately.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tailssh issues and pull requests for the same root cause.
+
+### ISSUE-2026-099 — tsdial: Netcat exits before a delayed server response completes
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: CLI correctness.
+- Publication target: Undecided.
+- Summary: Client EOF must close only the TCP write half while server output continues to be copied.
+  The first completed copy direction ends `runNC` and closes the whole connection.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `cmd/tailscale/cli/nc.go:74-83`.
+  Piped input commonly reaches EOF before a response generated only after that EOF.
+- Shared change pressure: Not a DRY finding; `runNC` stream lifecycle is the single decision owner.
+- Impact: Source proves that valid server responses can be truncated while the command exits successfully.
+  Production frequency and scale are unmeasured.
+- Proposed direction: Half-close the write side, then keep copying until server output ends.
+- Risks and boundaries: Preserve stream cleanup and exit status while waiting for delayed server output.
+- Verification: Make the server respond only after EOF; output must be complete and exit must succeed.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tsdial issues and pull requests for the same root cause.
+
+### ISSUE-2026-100 — controlbase: Serve succeeds without the configured service advertisement
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: CLI correctness.
+- Publication target: Undecided.
+- Summary: Successful `serve --service` must configure and advertise the same service.
+  The error from `addServiceToPrefs` is discarded while handlers are still saved.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `cmd/tailscale/cli/serve_v2.go:519-580`.
+  The dedicated `serve advertise` path correctly propagates the same helper error.
+- Shared change pressure: Not a DRY finding; `serve --service` transaction ordering is the single decision owner.
+- Impact: Source proves that handlers can be saved while the service stays invisible and unreachable.
+  Production frequency and scale are unmeasured.
+- Proposed direction: Return a clear advertisement error before any ServeConfig mutation.
+- Risks and boundaries: Preserve atomicity between preference advertisement and ServeConfig persistence.
+- Verification: Make `EditPrefs` fail; ServeConfig must not be written.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-101 — controlbase: Port range ending at 65535 continues after counter overflow
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: CLI correctness.
+- Publication target: Undecided.
+- Summary: Every port in a closed range must be applied exactly once and configuration must terminate.
+  A `uint16` counter wraps from 65535 to zero and continues.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `cmd/tailscale/cli/serve_v2.go:934-956`.
+  File and Unix targets accept the wrapped values without an error that stops the loop.
+- Shared change pressure: Not a DRY finding; Serve port-range iteration is the single decision owner.
+- Impact: Source proves that valid Serve configurations can block the CLI process indefinitely.
+  Production frequency and scale are unmeasured.
+- Proposed direction: Widen the counter, or break explicitly after processing `Last`.
+- Risks and boundaries: Preserve closed-range semantics at the `uint16` boundary without duplicate ports.
+- Verification: Apply `tcp:65535` to a valid file target; the command must finish after one application.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-102 — netstack: Late port mapping survives Close and local port changes
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Close and `SetLocalPort` must invalidate every mapping from an older generation.
+  Background work can commit later without a closed-state or generation check.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `net/portmapper/portmapper.go:301-327,477-781`.
+  A late result can install the old port after invalidation has already completed.
+- Shared change pressure: Not a DRY finding; port-mapping generation commit is the single decision owner.
+- Impact: Source proves that router mappings can remain unmanaged after shutdown or a port change.
+  Production frequency and scale are unmeasured.
+- Proposed direction: Capture the generation at start and immediately release stale results.
+- Risks and boundaries: Preserve lifecycle invalidation, concurrent result handling, and stale router-rule cleanup.
+- Verification: Delay the mapping response, call Close, and verify that no router rule remains.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior netstack issues and pull requests for the same root cause.
+
+### ISSUE-2026-103 — clientupdate: Windows MSI retry can remove the installed product
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Platform correctness.
+- Publication target: Undecided.
+- Summary: A failed update must preserve the previously working installation.
+  Any generic first failure triggers uninstall before a second installation attempt.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `clientupdate/clientupdate_windows.go:201-267`.
+  If the second installation also fails, the source provides no recovery path.
+- Shared change pressure: Not a DRY finding; the Windows MSI update transaction is the single decision owner.
+- Impact: Source proves that two installation failures can leave no client installed.
+  Production frequency and scale are unmeasured.
+- Proposed direction: Uninstall only for confirmed downgrades and keep the prior installation recoverable.
+- Risks and boundaries: Preserve product availability, rollback state, and Windows MSI downgrade handling.
+- Verification: Make both installation attempts fail; the old product must remain installed.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior clientupdate issues and pull requests for the same root cause.
+
+### ISSUE-2026-104 — controlbase: Web self-update reaches neither install nor progress endpoint
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Platform correctness.
+- Publication target: Undecided.
+- Summary: The web route must proxy installation POST and progress GET requests to LocalAPI.
+  Install is absent, and the proxy permits only POST for Progress.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `client/web/web.go:599-632; src/hooks/self-update.ts:39-59`.
+  LocalAPI accepts POST for install, while its progress handler accepts only GET.
+- Shared change pressure: Not a DRY finding; the web-to-LocalAPI proxy allowlist is the single decision owner.
+- Impact: Source proves that “Update now” starts no update and later always reports failure.
+  Production frequency and scale are unmeasured.
+- Proposed direction: Allow both routes in the proxy with their actual HTTP methods.
+- Risks and boundaries: Preserve endpoint method boundaries and avoid broadening unrelated proxy access.
+- Verification: Start a web update and follow it through the successful progress end state.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-105 — doctor: Linux Capget writes beyond an undersized buffer
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Platform correctness.
+- Publication target: Undecided.
+- Summary: `LINUX_CAPABILITY_VERSION_3` requires two `CapUserData` entries for `Capget`.
+  The kernel receives a pointer to only one `CapUserData` entry.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `doctor/permissions/permissions_linux.go:45-52` contains the affected `Capget` call.
+  The in-tree TailSSH caller explicitly uses a two-entry array.
+- Shared change pressure: Not a DRY finding; the Linux doctor `Capget` call owns its ABI buffer sizing.
+- Impact: A Doctor call can corrupt adjacent daemon memory or crash tailscaled.
+  The supplied finding does not measure production frequency.
+- Proposed direction: Allocate two entries and pass the first array pointer to `Capget`.
+- Risks and boundaries: Preserve the Linux capability ABI layout and both capability words.
+- Verification: Run Doctor under memory diagnostics and check that both capability words are read correctly.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior doctor issues and pull requests for the same root cause.
+
+### ISSUE-2026-106 — controlbase: Synology migration moves persistent state into the name mem
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Provider prefixes select stores and are not filesystem destinations.
+  Migration treats `mem:` as a filename and renames the old state into it.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `cmd/tailscaled/tailscaled.go:352-381,524-529` contains migration and store selection.
+  The later store setup still uses the memory provider and ignores the renamed file.
+- Shared change pressure: Not a DRY finding; the tailscaled migration gate owns the file-path decision.
+- Impact: `--state=mem:` removes old node state from its expected persistent path.
+  The supplied finding does not measure production occurrence.
+- Proposed direction: Run migration only for real file paths and skip provider prefixes.
+- Risks and boundaries: Preserve persistent state and avoid moving it for `mem:`, `kube:`, or `arn:` providers.
+- Verification: Start with old state and `mem:`, `kube:`, and `arn:`; verify that nothing is renamed.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-107 — tsnet: Failed tsnet Serve reset is never retried
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Every successful `Up` must clear stale persisted Serve state.
+  `sync.Once` is consumed even when the first reset fails.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `tsnet/tsnet.go:566-587` contains the one-shot startup cleanup.
+  A later `Up` skips cleanup, while `ListenService` relies on cleanup succeeding.
+- Shared change pressure: Not a DRY finding; the tsnet startup cleanup state owns retry eligibility.
+- Impact: Stale Serve handlers can keep later service listeners marked as already occupied.
+  The supplied finding does not quantify production occurrence.
+- Proposed direction: Replace sync.Once with retryable success state, not an unconditional reset.
+- Risks and boundaries: Preserve concurrent `Up` safety and do not mark failed cleanup as successful.
+- Verification: Disrupt the first reset, repeat `Up`, and verify that the same service can then start.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tsnet issues and pull requests for the same root cause.
+
+### ISSUE-2026-108 — derper: DERP connection can survive completed server Close
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: `Close` must close and wait for every accepted DERP connection.
+  `Accept` can add to `netConns` after the Close snapshot.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `derp/derpserver/derpserver.go:606-664` contains shutdown and connection registration.
+  `Accept` does not check the closed server state when registering a connection.
+- Shared change pressure: Not a DRY finding; DERP connection registration owns admission during shutdown.
+- Impact: A late connection can remain blocked or process traffic after shutdown.
+  The supplied finding does not quantify production occurrence.
+- Proposed direction: Synchronize shutdown with registration and immediately close late connections.
+- Risks and boundaries: Preserve connection tracking, shutdown waiting, and concurrent `Accept` behavior.
+- Verification: Insert `Accept` between the snapshot and close; verify that the connection cannot survive.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior derper issues and pull requests for the same root cause.
+
+### ISSUE-2026-109 — derper: Failed STUN bind is invisible to operators
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Enabled STUN must start or produce a visible startup error.
+  The goroutine discards every error returned by `ListenAndServe`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `cmd/derper/derper.go:183-186` launches the affected STUN goroutine.
+  The standalone `stund` command explicitly treats the same bind error as fatal.
+- Shared change pressure: Not a DRY finding; derper startup owns propagation of the STUN bind result.
+- Impact: DERP can appear healthy while the configured STUN service is entirely absent.
+  The supplied finding does not quantify production occurrence.
+- Proposed direction: Bind synchronously or propagate startup errors through a monitored error channel.
+- Risks and boundaries: Preserve DERP startup lifecycle and avoid leaking a failed STUN goroutine.
+- Verification: Occupy the STUN port; verify that derper visibly reports the error or fails startup.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior derper issues and pull requests for the same root cause.
+
+### ISSUE-2026-110 — netstack: DNS forwarder sends SERVFAIL while also returning an error
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: DNS forwarding must return a response with nil, or an error without a sent response.
+  The all-error branch sends SERVFAIL and still returns `firstErr`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `net/dns/resolver/forwarder.go:1196-1204,1335-1382` contains the affected paths.
+  Resolver callers prioritize the error and do not read the buffered response.
+- Shared change pressure: Not a DRY finding; the DNS forwarder owns response-or-error completion.
+- Impact: Clients can miss the immediate SERVFAIL response and wait or retry unnecessarily.
+  The supplied finding does not quantify production occurrence.
+- Proposed direction: Return nil after a successful send and mark transport errors unhealthy separately.
+- Risks and boundaries: Preserve exactly one DNS completion and retain transport health accounting.
+- Verification: Fail all upstreams; verify that exactly one SERVFAIL response arrives.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior netstack issues and pull requests for the same root cause.
+
+### ISSUE-2026-111 — netstack: Repeated OpenBSD DNS Set overwrites the original backup
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: `Close` must restore the `resolv.conf` that existed before Tailscale.
+  Every `SetDNS` call overwrites the shared backup.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `net/dns/resolvd.go:35-95` contains OpenBSD backup, Set, and restore handling.
+  The second call backs up the file already modified by the first call.
+- Shared change pressure: Not a DRY finding; the OpenBSD DNS manager owns the baseline backup lifetime.
+- Impact: `Close` can restore an earlier Tailscale search domain instead of the original file.
+  The supplied finding does not quantify production occurrence.
+- Proposed direction: Save the baseline once per manager lifetime and release it only after restore.
+- Risks and boundaries: Preserve the exact original `resolv.conf` across repeated `SetDNS` calls and `Close`.
+- Verification: Set two DNS configurations; verify that `Close` restores the exact original file.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior netstack issues and pull requests for the same root cause.
+
+### ISSUE-2026-112 — netstack: NRPT deletion errors permanently forget remaining Windows rules
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Platform correctness.
+- Publication target: Undecided.
+- Summary: A failed rule removal must remain known for cleanup and retry.
+  The deletion error is discarded while the ID list is still shortened.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `net/dns/nrpt_windows.go:237-255` contains the affected deletion and ID update.
+  Later `DelAllRuleKeys` no longer knows about the remaining registry rule.
+- Shared change pressure: Not a DRY finding; the Windows NRPT rule tracker owns deletion confirmation.
+- Impact: Removed domains can keep routing through stale nameservers.
+  The supplied finding does not quantify production occurrence.
+- Proposed direction: Retain IDs until deletion is confirmed and return the deletion error.
+- Risks and boundaries: Preserve Windows registry rule IDs across failed cleanup attempts.
+- Verification: Disrupt one deletion; verify that its ID remains and the next cleanup completes it.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior netstack issues and pull requests for the same root cause.
+
+### ISSUE-2026-113 — prober: Prober computes median from unsorted latency values
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Statistics correctness.
+- Publication target: Undecided.
+- Summary: `RecentMedianLatency` must return the median of recent measurements.
+  The function selects the middle element of insertion order.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `prober/prober.go:405-410,463-469` contains history copying and median selection.
+  The copied history is never sorted before indexing.
+- Shared change pressure: Not a DRY finding; `RecentMedianLatency` owns ordering before median selection.
+- Impact: The status page and API can report a wrong median for nonmonotonic latencies.
+  The supplied finding does not quantify production occurrence.
+- Proposed direction: Clone and sort the slice, then apply the existing even-count policy.
+- Risks and boundaries: Preserve history order outside the clone and retain the existing even-count policy.
+- Verification: Use `100ms,1ms,2ms`; verify that `RecentMedianLatency` returns `2ms`.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior prober issues and pull requests for the same root cause.
+
+### ISSUE-2026-114 — tsweb: Accept-Encoding with q equal to zero is still served
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: HTTP correctness.
+- Publication target: Undecided.
+- Summary: A `q=0` value must exclude the corresponding Content-Encoding variant.
+  Parameters are stripped and only the encoding name is compared.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `tsweb/tsweb.go:144-165; util/precompress/precompress.go:63-79` contains negotiation and selection.
+  Brotli is selected before Gzip even for `br;q=0`.
+- Shared change pressure: Not a DRY finding; HTTP precompressed-asset negotiation owns quality filtering.
+- Impact: Clients can receive explicitly rejected compression and fail to load assets.
+  The supplied finding does not quantify production occurrence.
+- Proposed direction: Parse quality parameters and reject encodings whose quality is zero.
+- Risks and boundaries: Preserve Brotli, Gzip, and Identity selection while honoring explicit exclusions.
+- Verification: Use `br;q=0, gzip` for Gzip and `gzip;q=0` for Identity; verify both selections.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tsweb issues and pull requests for the same root cause.
+
+### ISSUE-2026-115 — tsdial: Synology proxy parse failure becomes a direct success after one occurrence
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: An unchanged invalid proxy configuration must keep returning the same parse error.
+  The code caches the mtime but returns the parse error only on the first call.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `net/tshttpproxy/tshttpproxy_synology.go:47-58`.
+  The second call skips parsing and returns a nil proxy and nil error; runtime frequency is unmeasured.
+- Shared change pressure: Not a DRY finding; the Synology proxy cache is the single decision owner.
+- Impact: Source proves later control requests silently bypass the required proxy after a parse error.
+  The production frequency and duration of such bypasses are unmeasured.
+- Proposed direction: Cache the parse error, or record the mtime only after parsing succeeds.
+- Risks and boundaries: Preserve cache state semantics for unchanged files and successful proxy parses.
+- Verification: Read an invalid file twice; both calls should return the same error.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tsdial issues and pull requests for the same root cause.
+
+### ISSUE-2026-116 — osrouter: Windows NDP rules use the wrong remote address condition
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Platform correctness.
+- Publication target: Undecided.
+- Summary: Inbound NDP rules must allow sources from `fe80::/10`.
+  `permitNDP` instead always sets the multicast value `ff02::2`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `wf/firewall.go:404-480`.
+  The later protocol block rejects unmatched ICMPv6 packets; production frequency is unmeasured.
+- Shared change pressure: Not a DRY finding; `permitNDP` is the single decision owner for the WFP condition.
+- Impact: Source proves Router Advertisements and Redirects are blocked while the killswitch is active.
+  The production prevalence of affected IPv6 traffic is unmeasured.
+- Proposed direction: Use the passed `remoteAddress` directly as the WFP condition value.
+- Risks and boundaries: Preserve Windows WFP translation and IPv6 neighbor-discovery boundaries.
+- Verification: Check that RA and Redirect packets from `fe80::/10` pass the generated filter.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior osrouter issues and pull requests for the same root cause.
+
+### ISSUE-2026-117 — osrouter: Exited Windows firewall child is never restarted
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: The desired firewall state must be restored after a child process failure.
+  After child exit, `fwProc`, the encoder, and `known` remain unchanged.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `wgengine/router/osrouter/router_windows.go:249-397`.
+  Identical states take the fast path, while changes write to the broken encoder; frequency is unmeasured.
+- Shared change pressure: Not a DRY finding; the Windows router supervisor is the single decision owner.
+- Impact: Source proves killswitch and route changes stop applying after child failure.
+  The production rate and duration of child failures are unmeasured.
+- Proposed direction: Monitor child exit, invalidate handles, and resend the complete desired state.
+- Risks and boundaries: Preserve concurrent state updates, child cleanup, and full-state replay ordering.
+- Verification: After a successful Set, terminate the child; an identical Set should restart it.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior osrouter issues and pull requests for the same root cause.
+
+### ISSUE-2026-118 — controlbase: Consensus Stop discards incomplete HTTP shutdown errors
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Stop must return deadline or listener errors from both HTTP server shutdowns.
+  Both `http.Server.Shutdown` errors are only logged and then overwritten.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `tsconsensus/tsconsensus.go:413-430`.
+  Production callers check an error the function cannot return; runtime occurrence is unmeasured.
+- Shared change pressure: Not a DRY finding; consensus Stop is the single decision owner for shutdown errors.
+- Impact: Source proves active command or monitor requests may remain while Stop reports success.
+  The production frequency of incomplete shutdowns is unmeasured.
+- Proposed direction: Attempt both shutdowns, then return their errors with `errors.Join`.
+- Risks and boundaries: Preserve both shutdown attempts, deadline handling, and listener cleanup.
+- Verification: Hold a request beyond the deadline; Stop should return `context.DeadlineExceeded`.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-119 — controlbase: FollowOnly ignores cancellation during long consensus retry sequences
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: The startup context must bound retry, refresh, and join work, with complete cleanup.
+  `time.Sleep`, refresh errors, and join contexts ignore startup cancellation.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `tsconsensus/tsconsensus.go:333-349; tsconsensus/http.go:40-65`.
+  Each join uses a new 30-second context from `context.Background`; runtime incidence is unmeasured.
+- Shared change pressure: Not a DRY finding; `FollowOnly` startup is the single decision owner for cancellation.
+- Impact: Source proves canceled startup may continue for minutes and leave servers and Raft resources.
+  The production frequency and resource lifetime are unmeasured.
+- Proposed direction: Propagate the context, make sleep selectable, and close all resources on error paths.
+- Risks and boundaries: Preserve cancellation concurrency, server cleanup, and Raft cleanup across every retry path.
+- Verification: Cancel during sleep and join; startup should end immediately without retained resources.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-120 — controlbase: Direct Close waits up to 25 seconds because of a lock cycle
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Bus callbacks and client Close must not have a cyclic lock dependency.
+  Close holds `c.mu`; an active callback needs it, while bus Close waits for the callback.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `control/controlclient/direct.go:424-478`.
+  The eventbus waits for five slow-subscriber timeouts, about 25 seconds; occurrence is unmeasured.
+- Shared change pressure: Not a DRY finding; Direct client Close is the single decision owner for lock ordering.
+- Impact: Source proves disconnect or daemon shutdown can block until the subscriber timeouts expire.
+  The production frequency of the lock cycle is unmeasured.
+- Proposed direction: Close the bus client before acquiring `c.mu`.
+- Risks and boundaries: Preserve callback concurrency, lock ordering, and eventbus cleanup behavior.
+- Verification: Block a callback on `c.mu`; Close should not wait for the bus timeout.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-121 — netstack: Capability-based ICMP rules ignore all destination prefixes
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Each `Match` rule must bind its source or capability and its `Dsts`.
+  The `SrcCaps` branch returns true on a capability match without checking the destination.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `wgengine/filter/match.go:62-83`.
+  The converter preserves `Dsts`; only this ICMP path drops them, with runtime incidence unmeasured.
+- Shared change pressure: Not a DRY finding; the `SrcCaps` ICMP match path is the single decision owner.
+- Impact: Source proves an authorized peer can pass ICMP rules for unintended local destinations.
+  The production frequency and reachable destination set are unmeasured.
+- Proposed direction: Require at least one matching destination prefix in the capability branch.
+- Risks and boundaries: Preserve capability matching and destination-prefix semantics for ICMP rules.
+- Verification: Check a capability source separately against an allowed and an excluded destination.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior netstack issues and pull requests for the same root cause.
+
+### ISSUE-2026-122 — netstack: UPnP validation failure leaves an installed router rule
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: A failed mapping creation must leave no external router resource.
+  External IP checks occur only after `AddPortMapping` succeeds.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `net/portmapper/upnp.go:624-690`.
+  The deletable mapping object is created only after all checks; router behavior is otherwise unmeasured.
+- Shared change pressure: Not a DRY finding; UPnP mapping creation is the single decision owner for rollback.
+- Impact: Source proves an unattended UDP forwarding rule can remain until lease expiry or indefinitely.
+  The production frequency and router-specific lifetime are unmeasured.
+- Proposed direction: After a successful add, defer rollback until the mapping is finally committed.
+- Risks and boundaries: Preserve external resource cleanup, lease state, and commit boundaries.
+- Verification: Disrupt the external IP query; the router should immediately receive `DeletePortMapping`.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior netstack issues and pull requests for the same root cause.
+
+### ISSUE-2026-123 — clientupdate: Linux update can install different CLI and daemon versions
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: The update must replace `tailscale` and `tailscaled` as one consistent unit.
+  Two independent renames provide no rollback when the second rename fails.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `clientupdate/clientupdate.go:1055-1113`.
+  After the second failure, the code returns before restart; failure frequency is unmeasured.
+- Shared change pressure: Not a DRY finding; the Linux paired-file installer is the single decision owner.
+- Impact: Source proves a second rename failure leaves the new CLI with the old daemon installed.
+  The production frequency and operational effect of that mismatch are unmeasured.
+- Proposed direction: Use an atomic pair strategy, or roll back the first rename if the second fails.
+- Risks and boundaries: Preserve installed files, rollback durability, restart ordering, and migration boundaries.
+- Verification: Fail only the second rename; both installed files should remain old.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior clientupdate issues and pull requests for the same root cause.
+
+### ISSUE-2026-124 — clientupdate: Distsign loads keys outside the configured proxy path
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Signature keys and payloads must use the same proxy configuration.
+  Keys use `http.Get`, while only package data uses the Tailscale proxy hook.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `clientupdate/distsign/distsign.go:215-343`.
+  Without the hook, the custom transport also disables the environment proxy; incidence is unmeasured.
+- Shared change pressure: Not a DRY finding; the distsign HTTP client is the single decision owner for update transport.
+- Impact: Source proves updates fail when a host can reach the network only through its system proxy.
+  The production prevalence of proxy-only hosts is unmeasured.
+- Proposed direction: Use one hook-capable HTTP client for every downloaded update component.
+- Risks and boundaries: Preserve proxy selection, signature verification flow, and transport cleanup.
+- Verification: Route the key, signature, HEAD, and GET through a proxy-only fixture.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior clientupdate issues and pull requests for the same root cause.
+
+### ISSUE-2026-125 — drive: Drive StatCache survives replacement of its child backends
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: A new `Generation` must expose changes to the domain, transport, and remotes.
+  `SetChildren` replaces backends but does not invalidate a cached PROPFIND.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `drive/driveimpl/local_impl.go:20-31,90-117`.
+  The cache runs before `GetChild` and can even return old 404 responses.
+- Shared change pressure: Not a DRY finding; `SetChildren` owns child replacement and cache invalidation.
+- Impact: Removed or replaced shares can return stale metadata for up to ten seconds.
+  The production frequency of stale responses is unmeasured.
+- Proposed direction: Fully invalidate StatCache immediately after a successful child replacement.
+- Risks and boundaries: Preserve successful replacement semantics and invalidate no earlier than success.
+- Verification: Cache a PROPFIND, replace the child, and immediately request the new metadata.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior drive issues and pull requests for the same root cause.
+
+### ISSUE-2026-126 — osrouter: Identical route and extra prefixes lose extra authorization
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: `kindExtra` must remain authorized independently of `RouteAll`.
+  The combined route branch returns false before honoring the extra authorization.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `net/routemanager/routemanager.go:659-685,822-860`.
+  One peer prefix sets both bits but is discarded as a normal route.
+- Shared change pressure: Not a DRY finding; the combined route branch owns route and extra eligibility.
+- Impact: Conn25 transit traffic fails with subnet routing disabled despite extra configuration.
+  The production frequency of this failure is unmeasured.
+- Proposed direction: Evaluate extra authorization independently and before rejection by `RouteAll`.
+- Risks and boundaries: Preserve normal route precedence while changing only the combined route and extra case.
+- Verification: Configure one `/32` as route and extra; it must remain with `RouteAll=false`.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior osrouter issues and pull requests for the same root cause.
+
+### ISSUE-2026-127 — taildrop: Taildrop retry removes the wrong delayed deletion task
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Resume must remove the deletion task for the reused partial file.
+  `Remove(baseName)` does not address the stored `partialName` key.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `feature/taildrop/send.go:88-100; delete.go:112-179`.
+  The Deleter uses exact keys and does not know an active transfer when the task expires.
+- Shared change pressure: Not a DRY finding; the resume path owns cancellation of its partial-file deletion task.
+- Impact: A long-running resume can lose its active partial file after one hour.
+  The production frequency of this loss is unmeasured.
+- Proposed direction: Remove the full partial key before opening the resume writer.
+- Risks and boundaries: Preserve partial-file ownership, delayed cleanup, and the final rename boundary.
+- Verification: Keep a resume active past the deletion deadline; the partial file and final rename must survive.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior taildrop issues and pull requests for the same root cause.
+
+### ISSUE-2026-128 — appc: RouteInfo snapshot shares mutable slices with the Connector
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: RouteInfo published outside the lock must be a stable snapshot.
+  `maps.Clone` copies only maps, not their `[]netip.Addr` values.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `appc/appconnector.go:231-236,506-510`.
+  The Connector later extends and sorts the same slices after publication.
+- Shared change pressure: Not a DRY finding; RouteInfo publication owns the snapshot memory boundary.
+- Impact: Later DNS changes can mutate or race with already published persistence data.
+  The production frequency of mutation or races is unmeasured.
+- Proposed direction: Deep-copy every slice value before publishing the event.
+- Risks and boundaries: Preserve lock boundaries and ensure no mutable slice remains shared after publication.
+- Verification: Pause the snapshot, change the source domain, and verify persistence data stays unchanged.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior appc issues and pull requests for the same root cause.
+
+### ISSUE-2026-129 — controlbase: Failed preferences patch clears AppConnector routes first
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: A failed mutation must leave application state and persistence unchanged.
+  `MaybeClearAppConnector` runs before validation and `EditPrefsAs`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `ipn/localapi/localapi.go:1015-1024`.
+  `ClearRoutes` empties state and publishes persistence before the later error occurs.
+- Shared change pressure: Not a DRY finding; the preferences patch flow owns commit ordering for route cleanup.
+- Impact: A rejected preferences patch loses learned routes while preferences remain unchanged.
+  The production frequency of rejected patches with route loss is unmeasured.
+- Proposed direction: Clear routes only after a successful preferences commit, or roll them back transactionally.
+- Risks and boundaries: Preserve preferences and RouteInfo atomically across validation, commit, and failure.
+- Verification: Send an invalid patch; both preferences and RouteInfo must remain unchanged.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-130 — controlbase: Incremental filter and UserProfile deltas are absent from the disk cache
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Applied netmap deltas must update the same durable restart cache.
+  Only the full-netmap store has persistence paths for filters and profiles.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `ipn/ipnlocal/local.go:2641-2696; netmapcache/netmapcache.go:214-318`.
+  The control path ends successful delta processing before any full store.
+- Shared change pressure: Not a DRY finding; each filter and UserProfiles delta owner owns its cache update.
+- Impact: After restart, the disk cache can restore older filter or profile values.
+  The production frequency of stale restart restoration is unmeasured.
+- Proposed direction: Add dedicated cache updates at the owners of filter and UserProfiles deltas.
+- Risks and boundaries: Preserve full-netmap storage and restart-cache consistency for both delta types.
+- Verification: Apply both delta types, reload, and require the exact new values.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-131 — health: Two health setters leave derived state stale
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Every relevant health input must update events and `CurrentState` immediately.
+  Both setters change only raw fields and omit `selfCheckLocked`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `health/health.go:629-652`.
+  Adjacent setters perform that derivation under the same mutex.
+- Shared change pressure: Not a DRY finding; each health setter owns immediate derivation after its mutation.
+- Impact: TLS and log configuration errors can appear late or remain visible after clear.
+  The production frequency and duration of stale health state are unmeasured.
+- Proposed direction: Run the existing self-check under the lock after each mutation.
+- Risks and boundaries: Preserve mutex ownership and existing event and `CurrentState` derivation semantics.
+- Verification: Set and clear both errors; events and `CurrentState` must follow immediately.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior health issues and pull requests for the same root cause.
+
+### ISSUE-2026-132 — health: Multiple health problems collapse nondeterministically into one entry
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Concurrent independent problems must remain fully and stably observable.
+  All map entries use the same `Warnable` key.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `health/health.go:1252-1286`.
+  Go map order nondeterministically decides which text remains last.
+- Shared change pressure: Not a DRY finding; health warning identity owns aggregation of keyed problems.
+- Impact: All but one faulty DERP region or TLS host can be hidden.
+  The production frequency of collapsed diagnostics is unmeasured.
+- Proposed direction: Aggregate problems deterministically or use a unique warning identity for each key.
+- Risks and boundaries: Preserve stable diagnostic identity and complete multi-problem reporting.
+- Verification: Set two regions and two hosts; all details must appear stably.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior health issues and pull requests for the same root cause.
+
+### ISSUE-2026-133 — sockstatlog: Sockstat stop neither drains nor isolates goroutine generations
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Disable must finish one generation and make its captured logs available.
+  Cancel does not wait, drain `eventCh`, or preserve a generation-local context.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `log/sockstatlog/logger.go:149-261`.
+  Old goroutines can adopt the new `lg.ctx` after reenable.
+- Shared change pressure: Not a DRY finding; the sockstat lifecycle owns generation context, join, drain, and flush.
+- Impact: Events can be lost, and rapid reenable can create duplicate pollers and data races.
+  The production frequency of loss, duplication, or races is unmeasured.
+- Proposed direction: Keep context per generation, join pollers, and synchronously drain the queue before flush.
+- Risks and boundaries: Preserve concurrency ownership and order cancel, join, drain, flush, and reenable safely.
+- Verification: Enqueue an event, interleave disable and reenable, and require one generation with that event.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior sockstatlog issues and pull requests for the same root cause.
+
+### ISSUE-2026-134 — logtail: Logtail shutdown reports full success after context cancellation
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: An interrupted shutdown must return the corresponding context error.
+  After cancellation and Wait, shutdown unconditionally returns nil.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The finding is at `logtail/logtail.go:384-419`.
+  Logpolicy and Netlog propagate this return value as though it were meaningful.
+- Shared change pressure: Not a DRY finding; Logtail shutdown owns the final delivery result returned to callers.
+- Impact: Callers can believe upload completed although cancellation stopped pending logs.
+  The production frequency and number of undelivered logs are unmeasured.
+- Proposed direction: After cleanup and Wait, return the observed `ctx.Err` to the caller.
+- Risks and boundaries: Preserve cleanup and Wait while changing only the cancellation result contract.
+- Verification: Pass an already canceled context and require `context.Canceled`.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior logtail issues and pull requests for the same root cause.
+
+### ISSUE-2026-135 — captiveportal: Captive portal shutdown does not await an active network check
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: After `Extension.Shutdown`, no extension work may remain active.
+  Shutdown only cancels and closes the event bus; it does not join the Detection goroutine.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `feature/captiveportal/captiveportal.go:100-110,185-285`.
+  Detection's own contract says that the network check can block for a long time.
+- Shared change pressure: Not a DRY finding; `Extension.Shutdown` owns the Detection loop lifetime decision.
+- Impact: Detection can access backend, host, and health resources after shutdown.
+  Production incidence and user-visible impact are unmeasured.
+- Proposed direction: Add a loop-done signal or WaitGroup, and await it outside the Extension mutex.
+- Risks and boundaries: Do not wait while holding the Extension mutex; preserve event-bus cleanup ordering.
+- Verification: Pause Detection; verify that shutdown can finish only after Detection returns.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior captiveportal issues and pull requests for the same root cause.
+
+### ISSUE-2026-136 — netstack: OpenBSD loses the bypass table after a failed deletion
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Platform correctness.
+- Publication target: Undecided.
+- Summary: Failed bypass cleanup must remain tracked until the routing table is deleted.
+  `bypassRtable` is cleared unconditionally, even when deletion fails.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `net/netns/netns_openbsd.go:113-121,151-173`.
+  Table search still rejects the occupied table after its ownership record is lost.
+- Shared change pressure: Not a DRY finding; the OpenBSD bypass cleanup path owns routing-table retry state.
+- Impact: The remaining routing table is never retried and can contribute to table exhaustion.
+  Production incidence and user-visible impact are unmeasured.
+- Proposed direction: Retain the table ID and retry state until deletion is confirmed.
+- Risks and boundaries: Preserve OpenBSD table ownership across errors and clear it only after confirmed deletion.
+- Verification: Force deletion to fail; verify that a second cleanup retries the same table.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior netstack issues and pull requests for the same root cause.
+
+### ISSUE-2026-137 — ipn-store: FileStore cache commits before the atomic file write
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: The cache and file must represent the same successfully persisted state.
+  The cache changes before `atomicfile.WriteFile` and is not rolled back after failure.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `ipn/store/stores.go:211-226`.
+  The equality fast path then skips the required second write attempt.
+- Shared change pressure: Not a DRY finding; FileStore owns the cache-to-file commit decision.
+- Impact: An identical retry after a file error returns false success without writing the file.
+  Production incidence and user-visible impact are unmeasured.
+- Proposed direction: Commit the prospective state to the cache only after the file commit succeeds.
+- Risks and boundaries: Preserve idempotent retries and never expose unpersisted state through the cache.
+- Verification: Disrupt the first write; verify that an identical retry actually writes the file.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior ipn-store issues and pull requests for the same root cause.
+
+### ISSUE-2026-138 — ipn-store: AWS state cache updates before a successful SSM commit
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: The cache must represent only SSM data that was persisted successfully.
+  Memory state changes before `PutParameter` and remains changed after an error.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `ipn/store/awsstore/store_aws.go:224-264`.
+  `ipn.WriteState` compares the premature cache and suppresses identical retries.
+- Shared change pressure: Not a DRY finding; the AWS store owns the memory-to-SSM commit decision.
+- Impact: Profile retries report success while SSM still contains the old state.
+  Production incidence and user-visible impact are unmeasured.
+- Proposed direction: Commit the cache after a successful put, or roll it back while holding the lock.
+- Risks and boundaries: Preserve lock safety and ensure failed provider writes remain retryable.
+- Verification: Force the put to fail; verify that an identical retry writes to SSM again.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior ipn-store issues and pull requests for the same root cause.
+
+### ISSUE-2026-139 — tka: TKA batch failure leaves partially persisted authority updates
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: `InformIdempotent` must leave storage unchanged whenever the authority update fails.
+  AUM files are written sequentially without batch rollback.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `tka/tka.go:575-581; tka/tailchonk.go:593-671`.
+  If file two fails, file one remains permanently stored but invisible to runtime state.
+- Shared change pressure: Not a DRY finding; the TKA AUM batch writer owns authority-update atomicity.
+- Impact: Storage retains part of an update that the authority reports as wholly failed.
+  Production incidence and user-visible impact are unmeasured.
+- Proposed direction: Persist the batch transactionally with a journal, temporary commit, or full rollback.
+- Risks and boundaries: Preserve authority atomicity across storage errors and reopen boundaries.
+- Verification: Disrupt the second AUM write; verify after reopen that no new AUM exists.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tka issues and pull requests for the same root cause.
+
+### ISSUE-2026-140 — tka: Stat failure makes young TKA history appear old
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Metadata errors must stop irreversible compaction and purge.
+  `CommitTime` converts every stat error to zero time plus nil.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `tka/tailchonk.go:371-401,773-787,935-977`.
+  Retention treats zero time as old and marks the AUM as deletable before `MinAge`.
+- Shared change pressure: Not a DRY finding; `CommitTime` owns the metadata-error decision used by retention.
+- Impact: A young inactive fork history can be deleted before `MinAge` expires.
+  Production incidence and user-visible impact are unmeasured.
+- Proposed direction: Return a wrapped stat error and abort compaction before purge.
+- Risks and boundaries: Preserve legacy-AUM handling while preventing purge after any metadata error.
+- Verification: Disrupt stat for a young legacy AUM; verify that Compact fails without deletion.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tka issues and pull requests for the same root cause.
+
+### ISSUE-2026-141 — k8s-operator: Kubernetes StateStore maps distinct keys to the same field
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven key collision through debug state APIs; first-party collision not observed.
+- Internal priority: Low.
+- Confidence: Medium.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Distinct `StateKey` values must address distinct persisted values.
+  Replacing every invalid character with an underscore loses key identity.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `ipn/store/kubestore/store_kube.go:299-320`.
+  `foo@bar` and `foo_bar` reach the same Secret field through `dev-store-set`.
+- Shared change pressure: Not a DRY finding; Kubernetes StateStore owns the StateKey-to-Secret-field encoding.
+- Impact: Writing or deleting one key can silently overwrite another key.
+  Production incidence and user-visible impact are unmeasured.
+- Proposed direction: Introduce reversible collision-free encoding with migration for existing Secret fields.
+- Risks and boundaries: Preserve existing Secret data and opaque `StateKey` identity during migration.
+  Debug callers make the collision reachable; use reversible encoding and migrate legacy fields.
+- Verification: Independently write, read, and delete two colliding keys without cross-key effects.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior k8s-operator issues and pull requests for the same root cause.
+
+### ISSUE-2026-142 — k8s-operator: Kubernetes certificate cache returns mixed certificate-key pairs
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Readers must see a certificate and private key from the same commit.
+  The cache reads and writes the two values through separate store operations.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `ipn/store/kubestore/store_kube.go:323-387,645-663`.
+  A reader between writes gets the new certificate and old key without a store error.
+- Shared change pressure: Not a DRY finding; the Kubernetes certificate cache owns TLS-pair atomicity.
+- Impact: Read-only certificate sharing can fail valid TLS handshakes during reload.
+  Production incidence and user-visible impact are unmeasured.
+- Proposed direction: Guard pair access with a dedicated lock, without network operations under that lock.
+- Risks and boundaries: Preserve reader-writer concurrency and keep all network access outside the pair lock.
+- Verification: Interleave a writer and reader deterministically; verify that no mixed pair appears.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior k8s-operator issues and pull requests for the same root cause.
+
+### ISSUE-2026-143 — localapi: ReloadConfig error response is empty and loses the cause
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: CLI correctness.
+- Publication target: Undecided.
+- Summary: Reload must always return an encoded `ReloadConfigResponse`.
+  The error branch sets `res.Err` and returns before `Encode`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `ipn/localapi/localapi.go:735-753`.
+  `net/http` therefore emits implicit status 200 with a completely empty body.
+- Shared change pressure: Not a DRY finding; the LocalAPI ReloadConfig handler owns response encoding.
+- Impact: The CLI and containerboot receive JSON EOF instead of the actual config error.
+  Production incidence and user-visible impact are unmeasured.
+- Proposed direction: Encode the error branch fully under the existing 200-with-JSON contract.
+- Risks and boundaries: Preserve the existing HTTP 200 JSON schema and the original backend error text.
+- Verification: Send an invalid reload; verify that LocalClient receives the exact backend error.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior localapi issues and pull requests for the same root cause.
+
+### ISSUE-2026-144 — tsnet: Failed ListenFunnel leaves Funnel permission enabled
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Failed listener setup must leave no newly added Funnel configuration.
+  `AllowFunnel` is persisted before Listen and is not removed after a Listen error.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `tsnet/tsnet.go:1539-1567`.
+  The next attempt sees permission already set and registers no cleanup callback.
+- Shared change pressure: Not a DRY finding; `ListenFunnel` owns Funnel permission setup and rollback.
+- Impact: Persisted Funnel permission remains without a listener and survives later retries.
+  Production incidence and user-visible impact are unmeasured.
+- Proposed direction: Transactionally roll back newly set Funnel permission after every Listen error.
+- Risks and boundaries: Remove only permission created by the failed attempt; preserve preexisting Funnel state.
+- Verification: Create a port collision; verify that ServeConfig contains no Funnel permission afterward.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tsnet issues and pull requests for the same root cause.
+
+### ISSUE-2026-145 — tsnet: ServiceListener Close cannot retry failed cleanup
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: `Close` must fully remove the listener, advertisement, and ServeConfig, with retryable cleanup.
+  A shared `sync.Once` permanently caches even transient cleanup errors.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `tsnet/tsnet.go:1695-1747`.
+  Later Close calls only return the old error and perform no further cleanup.
+- Shared change pressure: Not a DRY finding; ServiceListener Close owns the cleanup retry decision.
+- Impact: Source proves closed listeners can remain advertised and configured.
+  The production frequency is not measured in the supplied finding.
+- Proposed direction: Track listener closure and each idempotent cleanup step separately, retrying incomplete steps.
+- Risks and boundaries: Preserve idempotency and concurrency safety while allowing cleanup retries.
+- Verification: Disrupt the first config cleanup; a second Close must remove the advertisement and config.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tsnet issues and pull requests for the same root cause.
+
+### ISSUE-2026-146 — tsnet: Tsnet accessors panic despite their documented pre-start contract
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: CLI correctness.
+- Publication target: Undecided.
+- Summary: Before startup, `CertDomains` must return nil and `TailscaleIPs` must return invalid addresses.
+  On a fresh Server, both methods dereference `s.lb`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `tsnet/tsnet.go:682-697`.
+  Before `Start` or join, the Server intentionally has no LocalBackend.
+- Shared change pressure: Not a DRY finding; each public accessor owns its pre-start return decision.
+- Impact: Source proves valid pre-start queries can terminate the caller through a nil dereference.
+  The production frequency is not measured in the supplied finding.
+- Proposed direction: When `s.lb` is nil, immediately return each method's documented zero values.
+- Risks and boundaries: Preserve the documented values for both pre-start and initialized Server states.
+- Verification: Call both methods on a zero Server; neither call may panic.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tsnet issues and pull requests for the same root cause.
+
+### ISSUE-2026-147 — tsnet: Close after a failed tsnet start masks the start error
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: `Close` must be safe after a startup attempt returns, including failed attempts.
+  An early startup error leaves `s.sys` nil, but Close dereferences it unconditionally.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `tsnet/tsnet.go:601-669,802-836`.
+  Public examples register `defer Close` before operations that trigger startup.
+- Shared change pressure: Not a DRY finding; tsnet Close owns partial-start resource cleanup.
+- Impact: Source proves common defer patterns can replace the startup error with a shutdown panic.
+  The production frequency is not measured in the supplied finding.
+- Proposed direction: Have Close explicitly skip uninitialized system and bus resources.
+- Risks and boundaries: Preserve cleanup for initialized resources while tolerating every partial-start boundary.
+- Verification: Make startup fail with an invalid `Dir`, then close the Server safely.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tsnet issues and pull requests for the same root cause.
+
+### ISSUE-2026-148 — k8s-operator: DNS rename deletes only the old IPv4 record
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Renaming must remove the previous DNS name from both address families.
+  The rename branch deletes only `rec.IP4[oldFqdn]`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/k8s-operator/dnsrecords.go:146-173`.
+  The shared records model has separate `IP4` and `IP6` maps.
+- Shared change pressure: Not a DRY finding; the DNS rename branch owns removal of the old FQDN.
+- Impact: Source proves the old name can remain resolvable as a stale AAAA record.
+  The production frequency is not measured in the supplied finding.
+- Proposed direction: On rename, also delete the same old FQDN from the IPv6 map.
+- Risks and boundaries: Preserve dual-stack ownership and do not delete records for the new FQDN.
+- Verification: Rename a dual-stack name; its old A and AAAA records must both disappear.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior k8s-operator issues and pull requests for the same root cause.
+
+### ISSUE-2026-149 — k8s-operator: Missing endpoint families remain published as DNS records
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Reconcile must set present address families and delete families that are no longer present.
+  Empty families are ignored, and two empty lists cause an early return.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/k8s-operator/dnsrecords.go:182-200,452-505`.
+  EndpointSlice deletion and family changes reach the same incomplete update path.
+- Shared change pressure: Not a DRY finding; the DNS reconcile path owns convergence of both family maps.
+- Impact: Source proves removed or unready pods can remain reachable through stale A or AAAA records.
+  The production frequency is not measured in the supplied finding.
+- Proposed direction: Always reconcile both maps and explicitly delete empty families.
+- Risks and boundaries: Preserve records for present families while converging deletion and family-change states.
+- Verification: Remove an IPv6 slice, then all endpoints; the corresponding records must disappear.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior k8s-operator issues and pull requests for the same root cause.
+
+### ISSUE-2026-150 — k8s-operator: Invalid multiple DNSConfig objects still provision nameserver resources
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Multiple DNSConfig objects must end reconcile with a not-ready status and no provisioning.
+  The invalid-state status result is ignored, and execution continues into `maybeProvision`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/k8s-operator/nameserver.go:111-203`.
+  An already addressed Service can subsequently allow `NameserverReady=True`.
+- Shared change pressure: Not a DRY finding; the invalid DNSConfig branch owns the reconcile stop decision.
+- Impact: Source proves an invalid cluster state can create resources and report False followed by True.
+  The production frequency is not measured in the supplied finding.
+- Proposed direction: Return the status call directly from the invalid branch and propagate its error.
+- Risks and boundaries: Preserve invalid-state status and prevent child-resource creation after singleton failure.
+- Verification: Create two DNSConfigs; no child resource or subsequent True status may appear.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior k8s-operator issues and pull requests for the same root cause.
+
+### ISSUE-2026-151 — k8s-operator: Recorder cleanup stops at the first missing replica state
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Cleanup must process every supported recorder replica before removing the finalizer.
+  The first `ok=false` returns success instead of continuing to the next replica.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/k8s-operator/tsrecorder.go:402-444`.
+  Missing or incomplete state is a normal provisioning state.
+- Shared change pressure: Not a DRY finding; the recorder cleanup loop owns finalizer readiness.
+- Impact: Source proves later authenticated recorder devices can remain after deletion completes.
+  The production frequency is not measured in the supplied finding.
+- Proposed direction: Continue on `ok=false` and remove the finalizer only after the full loop completes.
+- Risks and boundaries: Preserve cleanup across all replicas and keep the finalizer until the loop is complete.
+- Verification: Use replica zero without state and replica one active; finalize only after deleting replica one.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior k8s-operator issues and pull requests for the same root cause.
+
+### ISSUE-2026-152 — containerboot: IPv6 DNS backends never reach their firewall configuration branch
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Platform correctness.
+- Publication target: Undecided.
+- Summary: All inbound Tailscale connections must be forwarded to the DNS-based proxy target.
+  The entire IPv6 branch runs only when local IPv6 is currently absent.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/containerboot/forwarding.go:252-259`.
+  The inner `else if` also requires a valid IPv6 address, making it unreachable.
+- Shared change pressure: Not a DRY finding; the IPv6 forwarding branch owns backend eligibility.
+- Impact: Source proves IPv6 traffic to a DNS-based proxy target receives no DNAT rule.
+  The production frequency is not measured in the supplied finding.
+- Proposed direction: Gate externally on present IPv6 backends and handle address validity inside.
+- Risks and boundaries: Preserve IPv4 behavior and IPv6 address-validity checks at the platform boundary.
+- Verification: With valid node IPv6 and an AAAA backend, the path must call `DNATWithLoadBalancer`.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior containerboot issues and pull requests for the same root cause.
+
+### ISSUE-2026-153 — k8s-operator: Health-port collision routes user traffic to the internal health server
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Every declared service port must receive an unreserved internal target-port mapping.
+  A collision with the old health port is accepted as a user port by renaming it only.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/k8s-operator/egress-services.go:289-368`.
+  `TargetPort` remains 9002, and a new health port is also appended.
+- Shared change pressure: Not a DRY finding; egress port reconciliation owns reserved health-port handling.
+- Impact: Source proves a valid user port can reach the health endpoint instead of its Tailnet target.
+  The production frequency is not measured in the supplied finding.
+- Proposed direction: Remove old health entries by reserved name before matching user ports.
+- Risks and boundaries: Preserve existing user mappings while keeping internal health ports reserved during migration.
+- Verification: After port 80, configure 9002; that user port must carry Tailnet traffic.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior k8s-operator issues and pull requests for the same root cause.
+
+### ISSUE-2026-154 — k8s-operator: Connector status retains removed modes and device identities
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Status fields must describe only the currently observed Connector configuration.
+  Several fields are set only in positive branches and are never cleared.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/k8s-operator/connector.go:160-171,266-277`.
+  `replicas=0` clears `Devices` but retains `Hostname` and `TailnetIPs`.
+- Shared change pressure: Not a DRY finding; Connector status derivation owns clearing stale fields.
+- Impact: Source proves the API can report an old AppConnector role or identity with the new state.
+  The production frequency is not measured in the supplied finding.
+- Proposed direction: Reset mode and identity fields to zero values before each status derivation.
+- Risks and boundaries: Preserve current fields while clearing identities and modes removed by transitions.
+- Verification: Switch AppConnector to SubnetRouter, then set replicas to zero and inspect status.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior k8s-operator issues and pull requests for the same root cause.
+
+### ISSUE-2026-155 — cli: Debug ts2021 reports success after both connection attempts fail
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: CLI correctness.
+- Publication target: Undecided.
+- Summary: Exhausted diagnostic retries must return a non-nil process status.
+  Both failures are logged, but the function then returns nil.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/tailscale/cli/debug.go:1179-1188`.
+  The top-level process exits with status zero exactly when the function returns nil.
+- Shared change pressure: Not a DRY finding; `debug ts2021` owns the retry-exhaustion result.
+- Impact: Source proof: automation treats total control-connectivity failure as success.
+  Production frequency and scope are unmeasured.
+- Proposed direction: Retain the last connection error and return it after both attempts are exhausted.
+- Risks and boundaries: Preserve successful-attempt behavior and both diagnostic attempts.
+- Verification: Deterministically fail both attempts and require a non-zero process status.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior cli issues and pull requests for the same root cause.
+
+### ISSUE-2026-156 — tsidp: Tsidp omits creation of its local persistent state directory
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: The selected default state path must support the first persistent write.
+  The path is selected, but its parent directory is never created.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/tsidp/tsidp.go:141-149,1038-1060`.
+  Strict mode fails at startup; insecure mode can exit during a JWKS request.
+- Shared change pressure: Not a DRY finding; tsidp owns preparation of its selected persistent state root.
+- Impact: Source proof: fresh local-tailscaled mode fails on a client or key write.
+  Production frequency and affected environments are unmeasured.
+- Proposed direction: Create the selected root path with restrictive permissions before any persistence.
+- Risks and boundaries: Preserve restrictive permissions and the selected state-path boundary.
+- Verification: Start without the config subdirectory and require the first key write to succeed.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tsidp issues and pull requests for the same root cause.
+
+### ISSUE-2026-157 — tsidp: Tsidp UI mutates memory before durable persistence succeeds
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: A failed UI save must leave the active OAuth client state unchanged.
+  Create, Edit, and Regenerate mutate `funnelClients` before the write.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/tsidp/ui.go:129-140,205-249`.
+  The JSON API already rolls back, while the UI paths omit rollback.
+- Shared change pressure: Not a DRY finding; the tsidp UI mutation path owns the commit decision.
+- Impact: Source proof: runtime and file state diverge after OAuth client write failures.
+  Production frequency and recovery behavior are unmeasured.
+- Proposed direction: Write a candidate copy first and commit it to memory only after success.
+- Risks and boundaries: Preserve the existing OAuth client state exactly on every failed write.
+  Do not broaden the change beyond UI Create, Edit, and Regenerate commit ordering.
+- Verification: Fail each UI write and require the in-memory client to remain exactly unchanged.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tsidp issues and pull requests for the same root cause.
+
+### ISSUE-2026-158 — tsnet-proxy: Tsnet proxy does not propagate TCP half-close to the backend
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Client EOF must propagate as a write-side close to the backend.
+  Both `io.Copy` goroutines finish without a corresponding `CloseWrite`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `cmd/tsnet-proxy/tsnet-proxy.go:138-148`.
+  Full connection-close defers run only after both copies finish.
+- Shared change pressure: Not a DRY finding; the tsnet-proxy bidirectional copy loop owns half-close sequencing.
+- Impact: Source proof: backends waiting for EOF before replying can block indefinitely.
+  Production incidence is unmeasured.
+- Proposed direction: Half-close the opposite side when each copy direction finishes.
+- Risks and boundaries: Preserve bidirectional copying and defer full cleanup until both directions finish.
+- Verification: Use a backend that replies after EOF and require the proxy to deliver the full reply.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tsnet-proxy issues and pull requests for the same root cause.
+
+### ISSUE-2026-159 — sessionrecording: Recorder connection attempts exceed their shared thirty-second budget
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: All recorder probe and connection attempts must share a 30-second deadline.
+  The deadline limits only TCP dial, not the following HTTP handshake.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `sessionrecording/connect.go:27-88,386-429`.
+  TailSSH intentionally passes `context.Background` for the later upload.
+- Shared change pressure: Not a DRY finding; sessionrecording owns the transition from handshake to upload context.
+- Impact: Source proof: SSH recording setup can hang on response headers or `100 Continue`.
+  Production duration and incidence are unmeasured.
+- Proposed direction: Use a separate handshake context, then switch to the upload context only after success.
+- Risks and boundaries: Preserve the intentional `context.Background` lifetime for the later upload.
+  Apply the 30-second budget to probing and connection setup, not successful upload.
+- Verification: Accept the socket, withhold headers, and require return within the total 30-second budget.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior sessionrecording issues and pull requests for the same root cause.
+
+### ISSUE-2026-160 — tailssh: Normal recording completion is classified as a premature upload failure
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: A nil recorder result after normal session completion must mean success.
+  `rec.Close` runs before final session cancellation, so completion appears premature.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `ssh/tailssh/tailssh.go:1009-1010,1101,1472-1483`.
+  The uploader goroutine sees an active session context and replaces nil.
+- Shared change pressure: Not a DRY finding; TailSSH owns the ordering of session completion and recorder closure.
+- Impact: Source proof: successful sessions emit false error events or termination messages.
+  Production incidence is unmeasured.
+- Proposed direction: Signal normal completion before closing the recorder writer.
+- Risks and boundaries: Preserve actual premature-upload error reporting and final session cancellation.
+  Keep recorder closure and uploader-goroutine cleanup ordered.
+- Verification: Return nil after recorder body EOF and require that no error event is produced.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tailssh issues and pull requests for the same root cause.
+
+### ISSUE-2026-161 — web: Self-update log callback overwrites earlier progress messages
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Every progress message must append to the existing React log history.
+  The empty effect dependency set permanently captures the initial `updateLog`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `client/web/src/hooks/self-update.ts:30-45,114-122`.
+  `setUpdateLog(updateLog + ...)` does not use a functional state update.
+- Shared change pressure: Not a DRY finding; the self-update hook owns progress-history state updates.
+- Impact: Source proof: rapid update messages collapse to the latest closure snapshot.
+  Production timing and message-loss frequency are unmeasured.
+- Proposed direction: Use a functional setter that derives each appended message from current state.
+- Risks and boundaries: Preserve message order under closely spaced callback updates.
+- Verification: Send three rapid progress messages and require all three to remain visible in order.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior web issues and pull requests for the same root cause.
+
+### ISSUE-2026-162 — web: Web proxy dereferences a nil response after a LocalAPI transport error
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Proxy failures must become controlled HTTP error responses.
+  The error path reads `resp.StatusCode` even though `resp` may be nil.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `client/web/web.go:1306-1309`.
+  `http.Client.Do` can return `(nil, err)` on a transport error.
+- Shared change pressure: Not a DRY finding; the web proxy handler owns response validation after `http.Client.Do`.
+- Impact: Source proof: LocalAPI transport errors cause handler panics instead of clean web errors.
+  Production incidence is unmeasured.
+- Proposed direction: Handle the error before any response dereference and send a stable gateway error.
+- Risks and boundaries: Preserve response ownership and cleanup when `resp` is non-nil.
+- Verification: Refuse the LocalAPI connection and require an error status without a handler panic.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior web issues and pull requests for the same root cause.
+
+### ISSUE-2026-163 — client: ACL client requests and decodes conflicting representations
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven request construction; current external API behavior assumed.
+- Internal priority: Medium.
+- Confidence: Medium.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: `ACL` must request JSON, and `ACLHuJSON` details must request the JSON wrapper.
+  `ACL` omits Accept, while the details request incorrectly sets HuJSON.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `client/tailscale/acl.go:87-107,130-156`.
+  The cited current reference is https://tailscale.com/docs/reference/tailscale-api, but it remains unverified.
+- Shared change pressure: Not a DRY finding; the ACL client owns representation selection for each decode path.
+- Impact: Source proof: HuJSON comments or details responses can fail JSON decoding.
+  Production behavior under the unverified external API contract is unmeasured.
+- Proposed direction: Request JSON for `ACL`; omit the Accept header for the `ACLHuJSON` details request.
+- Risks and boundaries: Preserve the assumption that the current external API contract is unverified.
+  Do not change decoding beyond the JSON and details-wrapper representation boundaries.
+- Verification: Decode commented HuJSON and the details wrapper through both respective methods.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior client issues and pull requests for the same root cause.
+
+### ISSUE-2026-164 — client: Device mutations reject valid non-200 success statuses
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven status check; non-200 2xx response not observed.
+- Internal priority: Low.
+- Confidence: Medium.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Any successful 2xx status with an empty object must mean success.
+  `SetAuthorized` and `SetTags` accept only status 200.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The defect is at `client/tailscale/devices.go:242-295`.
+  Status 201 or 204 is incorrectly passed to `HandleErrorResponse`; none was observed.
+- Shared change pressure: Not a DRY finding; the device client owns success classification for both mutations.
+- Impact: Source proof: a 201 or 204 result is classified as an error.
+  No non-200 success response was observed, so production effect is unmeasured.
+- Proposed direction: Use one success check covering the full 200 through 299 range.
+- Risks and boundaries: Preserve `HandleErrorResponse` behavior for every non-2xx status.
+  Preserve empty-object handling for `SetAuthorized` and `SetTags`.
+- Verification: Return 201 and 204 from both endpoints and require both methods to return nil.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior client issues and pull requests for the same root cause.
+
+### ISSUE-2026-165 — controlbase: Empty Synology target file blocks migration of valid legacy state
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: Synology migration skips the legacy path only when the new state file is nonempty.
+  An empty existing file is also terminal because `!os.IsNotExist(nil)` is true.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected logic is at `cmd/tailscaled/tailscaled.go:341-365`.
+  The comment names a nonempty file as the only migration skip case.
+- Shared change pressure: Not a DRY finding; the Synology state migration is the single decision owner.
+- Impact: Source-proven: Tailscaled starts unconfigured despite valid legacy node state.
+  The production frequency is unmeasured.
+- Proposed direction: Treat only an existing file with positive size as already migrated.
+- Risks and boundaries: Preserve valid new state and migrate only when the target is empty.
+- Verification: Create an empty target and valid legacy state; verify that the legacy state is migrated.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-166 — controlbase: Windows service uninstall reports full success after timeout
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: CLI correctness.
+- Publication target: Undecided.
+- Summary: Uninstall succeeds only when the service can no longer be opened.
+  After 15 seconds, the function returns nil regardless of whether the service still exists.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected logic is at `cmd/tailscaled/install_windows.go:115-135`.
+  Non-NotFound `OpenService` errors are also misread as service disappearance.
+- Shared change pressure: Not a DRY finding; Windows service uninstall is the single decision owner.
+- Impact: Source-proven: The CLI confirms removal while the service can remain in the SCM.
+  The production frequency is unmeasured.
+- Proposed direction: Return concrete errors for timeout and every non-NotFound `OpenService` error.
+- Risks and boundaries: Preserve success only for confirmed service disappearance.
+- Verification: Keep the service open beyond 15 seconds; verify that uninstall exits nonzero.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-167 — controlbase: Windows service errors are logged but exit as success
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: CLI correctness.
+- Publication target: Undecided.
+- Summary: Non-nil errors from `svc.Run` must reach the top-level process.
+  `run` logs the error and then returns nil.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected logic is at `cmd/tailscaled/tailscaled.go:499-507`.
+  `main` calls `Fatal` only for an error that is actually returned.
+- Shared change pressure: Not a DRY finding; the Windows service runner is the single decision owner.
+- Impact: Source-proven: SCM or registration failures end Tailscaled with a misleading success status.
+  The production frequency is unmeasured.
+- Proposed direction: Wrap and propagate errors from `runWindowsService` to `main`.
+- Risks and boundaries: Preserve the original service error while adding only contextual wrapping.
+- Verification: Force `svc.Run` to fail; verify that the process reports the same error and exits nonzero.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-168 — controlbase: Babysitter dereferences process fields before child startup succeeds
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: Signals reach child resources only after those resources are fully published.
+  A goroutine uses `proc.p` and `wStdin` before `cmd.Start` succeeds.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected logic is at `cmd/tailscaled/tailscaled_windows.go:437-455,507-521`.
+  Both fields remain nil during pipe setup and after startup failures.
+- Shared change pressure: Not a DRY finding; the Windows babysitter lifecycle is the single decision owner.
+- Impact: Source-proven: Stop or signal during startup can panic the Windows babysitter.
+  Production timing and frequency are unmeasured.
+- Proposed direction: Publish the lifecycle atomically and fully handle early cancellation before spawn.
+- Risks and boundaries: Preserve concurrency ordering, child cleanup, and cancellation before and after spawn.
+- Verification: Interleave stop before, during, and after startup; verify that no panic or hang follows.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-169 — controlbase: Server status waits only after sending an error status
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: A `wait=true` request evaluates backend state after waiting completes.
+  The handler writes and flushes 503 before `awaitBackend`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected logic is at `ipn/ipnserver/server.go:136-149`.
+  A backend set later cannot change the already committed HTTP status.
+- Shared change pressure: Not a DRY finding; the server-status handler is the single decision owner.
+- Impact: Source-proven: Waiting clients can receive 503 with a success body after backend startup.
+  The production frequency is unmeasured.
+- Proposed direction: Wait first, then write exactly one consistent status and body.
+- Risks and boundaries: Preserve readiness waiting and avoid multiple status writes or flushes.
+- Verification: Set the backend after a delay; verify that the waiting request receives status 200.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-170 — tsdial: Unix safesocket startup permits two active listeners with one name
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: A socket path has exactly one listener at any time.
+  Probe, Remove, and Listen are not atomic across concurrent starts.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected logic is at `safesocket/unixsocket.go:24-70`.
+  Process A can unlink the socket already bound by process B.
+- Shared change pressure: Not a DRY finding; Unix socket-path ownership is the single decision owner.
+- Impact: Source-proven: Two daemons can split LocalAPI requests across different states and engines.
+  The production frequency is unmeasured.
+- Proposed direction: Hold a path-bound lifetime lock until the listener closes.
+- Risks and boundaries: Preserve exclusive path ownership and release the lock during listener cleanup.
+- Verification: Start two instances at a barrier; verify that exactly one becomes the listener.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tsdial issues and pull requests for the same root cause.
+
+### ISSUE-2026-171 — controlbase: Windows actor does not explicitly close duplicated access tokens
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven ownership violation; resource impact not measured.
+- Internal priority: Low.
+- Confidence: High.
+- Type: Platform correctness.
+- Publication target: Undecided.
+- Summary: Every caller of `WindowsToken` closes its duplicated handle.
+  `connIsLocalSystem` drops the wrapper after `IsLocalSystem`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected logic is at `ipn/ipnserver/actor.go:199-202`.
+  Other actor paths use `defer token.Close` for the same ownership contract.
+- Shared change pressure: Not a DRY finding; `connIsLocalSystem` is the single token-ownership decision owner.
+- Impact: Source-proven: The duplicated token ownership contract is violated.
+  Resource growth is unmeasured, and a finalizer exists.
+- Proposed direction: Register `defer token.Close` immediately after successful token retrieval.
+- Risks and boundaries: Preserve Windows handle ownership and avoid closing a token before `IsLocalSystem` completes.
+- Verification: Open many named-pipe connections; verify that the handle count remains stable after close.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-172 — containerboot: Missing HOME variables produce a relative daemon state path
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Medium.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: The automatic `--state` path is absolute or remains unspecified.
+  Without HOME and XDG, it becomes `.local/share/tailscale/tailscaled.state`.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected logic is at `paths/paths_unix.go:59-71`.
+  FileStore creates the directory relative to the daemon's current working directory.
+- Shared change pressure: Not a DRY finding; Unix default-state path selection is the single decision owner.
+- Impact: Source-proven: State can move with the working directory or appear lost after restart.
+  The production frequency is unmeasured.
+- Proposed direction: Reject a missing or relative XDG base and return no default path.
+- Risks and boundaries: Preserve absolute-path persistence and do not migrate state between working directories.
+- Verification: Clear HOME and XDG; verify that the default path is never relative.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior containerboot issues and pull requests for the same root cause.
+
+### ISSUE-2026-173 — derper: DERP consistency check compares connections with unique keys
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Low.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: `ConsistencyCheck` accepts the documented duplicate-connection state.
+  It compares `curClients` with the count of unique keys.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected logic is at `derp/derpserver/derpserver.go:770-815,2507-2511`.
+  Multiple connections increase only `curClients`, not `numLocalClientKeys`.
+- Shared change pressure: Not a DRY finding; DERP consistency accounting is the single decision owner.
+- Impact: Source-proven: Supported overlapping peer connections cause a false HTTP 500 diagnostic error.
+  The production frequency is unmeasured.
+- Proposed direction: Sum connections across all ClientSets and compare keys separately.
+- Risks and boundaries: Preserve duplicate connections while keeping connection and unique-key invariants distinct.
+- Verification: Use two connections for one key; verify that `ConsistencyCheck` succeeds.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior derper issues and pull requests for the same root cause.
+
+### ISSUE-2026-174 — controlbase: Stale health timers publish obsolete warning states
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Low.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: `Change.UnhealthyState` describes the current warning state when published.
+  Old timers check only whether any newer state exists.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected logic is at `health/health.go:448-489`.
+  Healthy-then-Unhealthy lets an old callback survive against the new map entry.
+- Shared change pressure: Not a DRY finding; health-state timer publication is the single decision owner.
+- Impact: Source-proven: The event bus and logs can report an earlier warning after state changes.
+  Production timing and frequency are unmeasured.
+- Proposed direction: Bind each callback to the stored state identity and timer generation.
+- Risks and boundaries: Preserve timer concurrency and suppress only callbacks superseded by newer state.
+- Verification: Delay the old timer and replace the state; verify that only the new payload is published.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior controlbase issues and pull requests for the same root cause.
+
+### ISSUE-2026-175 — taildrop: Taildrop reports failed reverse-proxy transfers as successful
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Low.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: `Succeeded` must be true only after a transfer completes successfully.
+  After `ReverseProxy.ServeHTTP`, success is published regardless of HTTP status.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `feature/taildrop/localapi.go:323-400`.
+  Transport errors produce 502 and upstream errors produce 500 without calling `fail`.
+- Shared change pressure: Not a DRY finding; Taildrop owns the proxy transfer outcome decision.
+- Impact: Source-proven: exported progress data contradicts the error observed by the PushFile caller.
+  The production frequency and scale are unmeasured.
+- Proposed direction: Capture proxy errors and non-200 statuses, then publish `Succeeded=false`.
+- Risks and boundaries: Preserve successful HTTP 200 progress while changing only proxy-failure reporting.
+- Verification: Compare progress for a transport error, HTTP 500, and HTTP 200.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior taildrop issues and pull requests for the same root cause.
+
+### ISSUE-2026-176 — capture: Capture registration can revive an already closed sink
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Low.
+- Confidence: High.
+- Type: Networking and lifecycle.
+- Publication target: Undecided.
+- Summary: No new outputs may be registered after the sink closes.
+  The closed check and map insertion occur on opposite sides of the mutex.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `feature/capture/capture.go:112-160`.
+  Close can clear the map and return between the check and registration.
+- Shared change pressure: Not a DRY finding; capture owns the sink registration and close decision.
+- Impact: Source-proven: a request gets HTTP 200 and headers but no live capture stream.
+  The production frequency and scale are unmeasured.
+- Proposed direction: Perform the closed check and registration in one locked operation.
+- Risks and boundaries: Keep close and registration atomic without reviving outputs or leaking map entries.
+- Verification: Pause registration before the lock, close the sink, and exclude any later map entry.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior capture issues and pull requests for the same root cause.
+
+### ISSUE-2026-177 — portlist: Windows port listing drops explicit non-loopback bindings
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Low.
+- Confidence: High.
+- Type: Platform correctness.
+- Publication target: Undecided.
+- Summary: `IncludeLocalhost=false` must exclude only loopback listeners.
+  The Windows filter accepts only unspecified bind addresses.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `portlist/portlist_windows.go:63-65`.
+  Explicit LAN or host addresses are not loopback, but the filter drops them.
+- Shared change pressure: Not a DRY finding; Windows portlist filtering owns the listener inclusion decision.
+- Impact: Source-proven: valid services are absent from the uploaded Hostinfo service state.
+  The production frequency and scale are unmeasured.
+- Proposed direction: Filter only `Addr().IsLoopback()` instead of filtering every specific address.
+- Risks and boundaries: Preserve the `IncludeLocalhost=false` boundary while admitting specific non-loopback binds.
+- Verification: Bind a service to a LAN IP and require it to appear in Hostinfo.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior portlist issues and pull requests for the same root cause.
+
+### ISSUE-2026-178 — portlist: macOS port listing publishes partial results from failed netstat processes
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Low.
+- Confidence: High.
+- Type: Platform correctness.
+- Publication target: Undecided.
+- Summary: A non-zero `netstat` exit must discard the incomplete service measurement.
+  The deferred `Process.Wait` error is ignored completely.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `portlist/portlist_macos.go:111-124`.
+  Parser EOF counts as success and makes the partial snapshot publishable.
+- Shared change pressure: Not a DRY finding; macOS portlist collection owns the snapshot acceptance decision.
+- Impact: Source-proven: failed enumeration can replace prior service state with an empty snapshot.
+  The production frequency and scale are unmeasured.
+- Proposed direction: Wait for process exit after parsing and return an error for a non-zero exit.
+- Risks and boundaries: Preserve the prior snapshot whenever process completion invalidates parsed output.
+- Verification: Emit one valid line, then fail the process; the snapshot must not change.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior portlist issues and pull requests for the same root cause.
+
+### ISSUE-2026-179 — tsconsensus: Consensus error interface breaks during a follower JSON round trip
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Low.
+- Confidence: High.
+- Type: Protocol correctness.
+- Publication target: Undecided.
+- Summary: State-machine errors must remain distinct from outer transport errors.
+  A concrete `error` is sent as `{}` and decoded into an interface.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `tsconsensus/http.go:67-91,150-167`.
+  The normal `ip pool exhausted` error follows this exact follower path.
+- Shared change pressure: Not a DRY finding; tsconsensus HTTP encoding owns the command error wire decision.
+- Impact: Source-proven: domain errors appear as JSON protocol errors instead of `CommandResult.Err`.
+  The production frequency and scale are unmeasured.
+- Proposed direction: Use an explicit wire DTO with an error code and message at the HTTP boundary.
+- Risks and boundaries: Keep state-machine errors separate from outer transport and JSON decoding failures.
+- Verification: Send pool exhaustion through a follower; decoding must set the result error and succeed.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior tsconsensus issues and pull requests for the same root cause.
+
+### ISSUE-2026-180 — containerboot: IPv4 DNS targets are also classified as IPv6 backends
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Source-proven contract violation; production impact not measured.
+- Internal priority: Low.
+- Confidence: High.
+- Type: Networking correctness.
+- Publication target: Undecided.
+- Summary: Each backend address must belong to exactly one IP-family list.
+  For IPv4, both `To4` and `To16` return a value.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  The affected code is at `cmd/containerboot/forwarding.go:212-227,252-254`.
+  The mapped `::ffff` value is then treated as an IPv6 address.
+- Shared change pressure: Not a DRY finding; containerboot forwarding owns the backend family decision.
+- Impact: Source-proven: IPv4-only config enables needless IPv6 forwarding and reports false warnings.
+  The production frequency and scale are unmeasured.
+- Proposed direction: Classify IPv4 first and `continue` before checking IPv6.
+- Risks and boundaries: Keep IPv4, mapped IPv4, and native IPv6 mutually exclusive during classification.
+- Verification: Require IPv4, mapped IPv4, and native IPv6 to enter exactly one list each.
+- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
+  Search prior containerboot issues and pull requests for the same root cause.
