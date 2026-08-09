@@ -295,14 +295,14 @@ Next finding ID: ISSUE-2026-075
 
 ### ISSUE-2026-012 — netmapcache: Missing values retain digests that suppress repair
 
-- Status: Hold.
-- Delivery mode: Undecided.
+- Status: Drafted.
+- Delivery mode: Issue.
 - Location: Not published.
 - Evidence class: Observed and source-proven; production startup impact not measured.
 - Internal priority: High.
 - Confidence: High.
 - Type: Persistence and state.
-- Publication target: Undecided.
+- Publication target: new issue.
 - Summary: `Cache` retains `lastWrote` digests after explicit removal and missing-value reads.
   A later identical write is then suppressed even though the Store value no longer exists.
 - Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
@@ -312,8 +312,10 @@ Next finding ID: ISSUE-2026-075
   A FileStore remove and identical peer re-add omitted the peer on `Load`.
   Removing `self`, loading, and storing the identical map left the cache unavailable.
   Removing `dns`, loading, and storing the identical map left DNS absent.
-  Merged pull requests #20111 and #20132 introduced and released `UpdatePeers`.
-  Focused searches found no matching issue or active pull request.
+  Merged pull request #20111 introduced `UpdatePeers`; #20132 cherry-picked it to `release-branch/1.100`.
+  Pull requests #18497, #18547, and #18590 establish the digest, missing-key, and skipped-write history.
+  None reports this missing-value repair root cause.
+  Focused issue, pull-request, and discussion searches found no exact duplicate or active competing fix.
 - Shared change pressure: Store values and their write-suppression digests share one `Cache` consistency owner.
 - Impact: A missing value can remain missing after an apparently successful identical Store or peer re-add.
   Production sequence frequency and startup impact are not measured.
@@ -321,9 +323,12 @@ Next finding ID: ISSUE-2026-075
   Invalidate the corresponding digest whenever `Load` observes a missing self or ordinary value.
 - Risks and boundaries: Preserve write suppression for unchanged values known to remain in the Store.
   Removal errors leave Store state uncertain, so invalidation may cause one safe repair write.
-- Verification: Focused overlays reproduced peer re-add, missing self, and missing DNS failures.
-  Invalidating the three digest paths made `TestUpdatePeers` and `TestInvalidCache` pass.
-- Missing publication evidence: Delivery mode, exact external target, and exact draft remain user decisions.
+- Verification: Focused temporary subcases in `TestUpdatePeers` and `TestInvalidCache` reproduced the peer re-add,
+  missing self, and missing DNS failures.
+  Invalidating the three digest paths made those same disposable subcases pass.
+  The current checked-in tests do not cover these repair sequences.
+- Missing publication evidence: Exact user approval of the completed bug-form draft and the official
+  `tailscale/tailscale` new-issue target.
 
 ### ISSUE-2026-013 — k8s-operator: Unavailable ProxyGroup fallthrough is intentional
 
@@ -1812,29 +1817,35 @@ Next finding ID: ISSUE-2026-075
 
 ### ISSUE-2026-074 — ipnlocal: Peer removal loses its StableNodeID before cache update
 
-- Status: Hold.
-- Delivery mode: Undecided.
+- Status: Drafted.
+- Delivery mode: Issue.
 - Location: Not published.
 - Evidence class: Observed and source-proven; production startup impact not measured.
 - Internal priority: High.
 - Confidence: High.
 - Type: Persistence and state.
-- Publication target: Undecided.
+- Publication target: new issue.
 - Summary: `UpdateNetmapDelta` applies peer removal before resolving the removed peer's StableNodeID.
   The updated node backend no longer contains the peer, so the disk cache receives no removal.
 - Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
   `ipn/ipnlocal/local.go:2441` applies mutations before the cache-removal lookup at lines 2565-2569.
   A focused `TestUpdateNetMapCache` overlay removed peer 601 through `UpdateNetmapDelta`.
   Reloading the production FileStore still returned the removed peer.
-  Pull requests #20111 and #20132 introduced and released the delta-cache update path.
-  Focused searches found no matching issue or active pull request.
+  Pull request #20111 introduced the delta-cache path; #20132 cherry-picked it to `release-branch/1.100`.
+  Pull request #20210 makes post-filter, pre-application identity capture necessary.
+  Pull requests #20141 and #20147 address separate live-engine delta regressions.
+  Focused issue, pull-request, and discussion searches found no exact duplicate or active competing fix.
 - Shared change pressure: One delta owner must preserve removed-peer identity until every downstream consumer uses it.
-- Impact: A peer removed by a delta can remain in the disk cache and reappear in cached startup state.
-  Production sequence frequency and startup impact are not measured.
+- Impact: A peer removed by a delta remains in the FileStore and is returned by a fresh `Cache.Load`.
+  A later cached startup can therefore install it.
+  Actual startup behavior, user-visible effects, production frequency, and affected releases are not measured.
 - Proposed direction: Capture StableNodeIDs after TKA mutation filtering and before applying the delta.
   Continue resolving updated peer views after application, then pass both sets to `writePeerDeltaToDiskLocked`.
 - Risks and boundaries: TKA filtering can rewrite an upsert into a removal.
-  Capture identity after filtering, preserve update behavior, and avoid retaining full removed Node values.
-- Verification: The focused production-path fixture failed against current source.
-  Capturing StableNodeIDs before `cn.UpdateNetmapDelta` made the same fixture pass.
-- Missing publication evidence: Delivery mode, exact external target, and exact draft remain user decisions.
+  Capture identity after filtering, preserve post-application update lookup, and avoid retaining full removed Node values.
+  A later full-map Store or explicit cache clear can repair the key, so do not characterize the stale state as permanent.
+- Verification: A focused temporary production-FileStore subcase in `TestUpdateNetMapCache` failed against current source.
+  Capturing StableNodeIDs before `cn.UpdateNetmapDelta` made that same disposable subcase pass.
+  The current checked-in test does not cover delta removal followed by a fresh cache load.
+- Missing publication evidence: Exact user approval of the completed bug-form draft and the official
+  `tailscale/tailscale` new-issue target.
