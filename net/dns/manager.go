@@ -42,6 +42,17 @@ var (
 	// ErrNoDNSConfig is returned by RecompileDNSConfig when the Manager
 	// has no existing DNS configuration.
 	ErrNoDNSConfig = errors.New("no DNS configuration")
+	// errEmptyBaseConfig is returned by compileConfig when the OS has no
+	// upstream resolvers to forward the default route to. See
+	// https://github.com/tailscale/tailscale/issues/20341
+	errEmptyBaseConfig = errors.New("no upstream resolvers in OS base config")
+)
+
+// Bounds for [Manager.retryEmptyBaseConfig]. The delay doubles each attempt,
+// so these give up after roughly a minute.
+const (
+	baseConfigRetryInterval = 1 * time.Second
+	baseConfigRetryAttempts = 6
 )
 
 // maxActiveQueries returns the maximal number of DNS requests that can
@@ -77,6 +88,7 @@ type Manager struct {
 	mu                  sync.Mutex // guards following
 	config              *Config    // Tracks the last viable DNS configuration set by Set.  nil on failures other than compilation failures or if set has never been called.
 	queryResponseMapper ResponseMapper
+	waitingForBaseCfg   bool // a retry goroutine is waiting for OS upstream resolvers
 }
 
 // NewManager created a new manager from the given config.
@@ -217,6 +229,7 @@ func (m *Manager) setLocked(cfg Config) error {
 	}
 
 	m.health.SetHealthy(osConfigurationSetWarnable)
+	m.health.SetHealthy(emptyBaseConfigWarnable)
 	m.config = &cfg
 
 	return nil
@@ -289,6 +302,16 @@ var osConfigurationReadWarnable = health.Register(&health.Warnable{
 		return fmt.Sprintf("Tailscale failed to fetch the DNS configuration of your device: %v", args[health.ArgError])
 	},
 	Severity:  health.SeverityLow,
+	DependsOn: []*health.Warnable{health.NetworkStatusWarnable},
+})
+
+// emptyBaseConfigWarnable warns that MagicDNS is inactive because the OS has no
+// upstream resolvers to forward the default route to.
+var emptyBaseConfigWarnable = health.Register(&health.Warnable{
+	Code:      "dns-empty-base-config",
+	Title:     "Waiting for system DNS configuration",
+	Text:      health.StaticMessage("Your device has no system DNS servers for Tailscale to forward queries to, so Tailscale has left DNS alone and MagicDNS is inactive. This usually resolves itself once the network is fully up."),
+	Severity:  health.SeverityMedium,
 	DependsOn: []*health.Warnable{health.NetworkStatusWarnable},
 })
 
@@ -462,6 +485,15 @@ func (m *Manager) compileConfig(cfg Config) (rcfg resolver.Config, ocfg OSConfig
 		}
 	}
 	var defaultRoutes []*dnstype.Resolver
+	if len(base.Nameservers) == 0 && !isSandboxedApple {
+		// Taking over here would point the OS at quad-100 with an empty "."
+		// route, failing every non-Tailscale name. Leave the OS config alone
+		// and retry until resolvers appear.
+		m.logf("no upstream resolvers in OS base config; not taking over DNS")
+		m.health.SetUnhealthy(emptyBaseConfigWarnable, nil)
+		m.retryEmptyBaseConfig()
+		return resolver.Config{}, OSConfig{}, errEmptyBaseConfig
+	}
 	for _, ip := range base.Nameservers {
 		defaultRoutes = append(defaultRoutes, &dnstype.Resolver{Addr: ip.String()})
 	}
@@ -493,6 +525,65 @@ func (m *Manager) scopeQuad100OnMacOS() bool {
 		return v
 	}
 	return m.knobs != nil && m.knobs.ScopeQuad100OnMacOS.Load()
+}
+
+// retryEmptyBaseConfig starts a goroutine that recompiles the last config until
+// it succeeds or baseConfigRetryAttempts run out. A later [Manager.Set] or link
+// change starts it again.
+//
+// waitingForBaseCfg keeps this to one goroutine: each retry runs compileConfig,
+// which calls back here while the base config is still empty.
+//
+// m.mu must be held.
+func (m *Manager) retryEmptyBaseConfig() {
+	syncs.AssertLocked(&m.mu)
+	if m.waitingForBaseCfg {
+		return
+	}
+	m.waitingForBaseCfg = true
+	go func() {
+		defer func() {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			m.waitingForBaseCfg = false
+		}()
+		d := baseConfigRetryInterval
+		for range baseConfigRetryAttempts {
+			select {
+			case <-m.ctx.Done():
+				return // Down was called; leave the OS config alone
+			case <-time.After(d):
+			}
+			d *= 2
+			done, err := m.recompileForBaseConfig()
+			if done {
+				return
+			}
+			if err != nil && !errors.Is(err, errEmptyBaseConfig) {
+				m.logf("error recompiling DNS config: %v", err)
+			}
+		}
+		m.logf("gave up waiting for OS upstream resolvers")
+	}()
+}
+
+// recompileForBaseConfig recompiles the last config, reporting whether
+// [Manager.retryEmptyBaseConfig] should stop.
+//
+// It rechecks m.ctx because [Manager.Down] can cancel it after the retry's own
+// check. Down doesn't hold m.mu, so this narrows that window rather than
+// closing it.
+func (m *Manager) recompileForBaseConfig() (done bool, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ctx.Err() != nil || m.config == nil {
+		return true, nil
+	}
+	if err := m.setLocked(*m.config); err != nil {
+		return false, err
+	}
+	m.logf("OS upstream resolvers appeared; DNS configured")
+	return true, nil
 }
 
 var isSandboxedMacOS = version.IsSandboxedMacOS
