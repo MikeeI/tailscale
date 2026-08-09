@@ -295,9 +295,9 @@ Next finding ID: ISSUE-2026-075
 
 ### ISSUE-2026-012 — netmapcache: Missing values retain digests that suppress repair
 
-- Status: Drafted.
+- Status: Published.
 - Delivery mode: Issue.
-- Location: Not published.
+- Location: https://github.com/tailscale/tailscale/issues/20795
 - Evidence class: Observed and source-proven; production startup impact not measured.
 - Internal priority: High.
 - Confidence: High.
@@ -327,8 +327,8 @@ Next finding ID: ISSUE-2026-075
   missing self, and missing DNS failures.
   Invalidating the three digest paths made those same disposable subcases pass.
   The current checked-in tests do not cover these repair sequences.
-- Missing publication evidence: Exact user approval of the completed bug-form draft and the official
-  `tailscale/tailscale` new-issue target.
+- Missing publication evidence: None.
+  Published as https://github.com/tailscale/tailscale/issues/20795 after exact draft and target approval.
 
 ### ISSUE-2026-013 — k8s-operator: Unavailable ProxyGroup fallthrough is intentional
 
@@ -1817,9 +1817,9 @@ Next finding ID: ISSUE-2026-075
 
 ### ISSUE-2026-074 — ipnlocal: Peer removal loses its StableNodeID before cache update
 
-- Status: Drafted.
+- Status: Published.
 - Delivery mode: Issue.
-- Location: Not published.
+- Location: https://github.com/tailscale/tailscale/issues/20796
 - Evidence class: Observed and source-proven; production startup impact not measured.
 - Internal priority: High.
 - Confidence: High.
@@ -1847,5 +1847,5 @@ Next finding ID: ISSUE-2026-075
 - Verification: A focused temporary production-FileStore subcase in `TestUpdateNetMapCache` failed against current source.
   Capturing StableNodeIDs before `cn.UpdateNetmapDelta` made that same disposable subcase pass.
   The current checked-in test does not cover delta removal followed by a fresh cache load.
-- Missing publication evidence: Exact user approval of the completed bug-form draft and the official
-  `tailscale/tailscale` new-issue target.
+- Missing publication evidence: None.
+  Published as https://github.com/tailscale/tailscale/issues/20796 after exact draft and target approval.
