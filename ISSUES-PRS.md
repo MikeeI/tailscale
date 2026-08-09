@@ -4,7 +4,7 @@ This file is the sole source of truth for every finding's ID, delivery mode, lif
 Read and update this ledger instead of inferring state from chat history, clone reports, or earlier reviews.
 `FORMAT.md` owns research, drafting, implementation authorization, approval, and publication rules.
 
-Next finding ID: ISSUE-2026-074
+Next finding ID: ISSUE-2026-075
 
 ### ISSUE-2026-001 — ipnlocal: Extension shutdown skips its drain window
 
@@ -213,26 +213,33 @@ Next finding ID: ISSUE-2026-074
 - Status: Hold.
 - Delivery mode: Undecided.
 - Location: Not published.
-- Evidence class: Source-proven; CI impact not measured.
+- Evidence class: Observed and source-proven; CI occurrence frequency not measured.
 - Internal priority: High.
 - Confidence: High.
 - Type: Error and orchestration.
 - Publication target: Undecided.
 - Summary: `testsForShard` maps invalid shard specifications and `go list` failures to an empty result.
   `runTests` treats that result as a legitimately empty shard and reports the package as skipped.
-- Evidence: `cmd/testwrapper/testwrapper.go:181-199` returns `nil, nil` for both error classes.
-  `cmd/testwrapper/testwrapper.go:278-286` converts a zero-length result into a successful skip.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `cmd/testwrapper/testwrapper.go:181-199` returns `nil, nil` for both error classes.
+  Lines 278-286 convert a zero-length result into a successful skip.
+  `TS_TEST_SHARD=bogus /tmp/testwrapper-repro ./cmd/testwrapper` exited zero and printed a skip.
+  `TS_TEST_SHARD=1/2 /tmp/testwrapper-repro ./does-not-exist` did the same after `go list` failed.
+  `TS_TEST_SHARD=100000/100000` remained a successful skip for a valid empty shard.
+  Issue #19886 and merged pull request #19887 introduced the current automatic sharding path.
+  Focused searches found no matching issue or active pull request.
 - Shared change pressure: Not a DRY finding; one discovery boundary conflates failure with valid emptiness.
-- Impact: Source proves that sharded tests can be omitted without a failing process status.
+- Impact: Invalid configuration or failed discovery can omit sharded tests without a failing process status.
   Occurrence frequency in current CI is not measured.
-- Proposed direction: Return errors for invalid specifications and failed discovery.
-  Preserve a distinct successful result for a valid empty shard.
-- Risks and boundaries: Do not turn a legitimately empty shard into a failure.
-  Preserve package-level fatal error and exit-code handling.
-- Verification: Exercise an invalid shard, a failing `go list`, and a valid shard with no assigned tests.
-  Only the valid empty shard should remain a successful skip.
-- Missing publication evidence: Verify current `upstream/main` and reproduce the false-green outcomes.
-  Search prior testwrapper and sharding issues and pull requests.
+- Proposed direction: Reject malformed and out-of-range shard specifications.
+  Use `CombinedOutput` for failed discovery and return an actionable non-`*exec.ExitError` diagnostic.
+  Preserve an empty successful result for a valid shard with no assigned tests.
+- Risks and boundaries: `runTests` special-cases wrapped `*exec.ExitError` values and can exit before logging them.
+  Preserve package-level fatal handling and do not turn a legitimate empty shard into a failure.
+- Verification: The current binary returned zero for invalid syntax and failed `go list`.
+  A source overlay returned non-zero with diagnostics for both failures.
+  The same overlay preserved success for a valid empty shard.
+- Missing publication evidence: Delivery mode, exact external target, and exact draft remain user decisions.
 
 ### ISSUE-2026-010 — Makefile: SSH integration prerequisites and build failures are backgrounded
 
@@ -286,59 +293,65 @@ Next finding ID: ISSUE-2026-074
 - Missing publication evidence: Verify current `upstream/main` and reproduce both retry paths.
   Search issues and pull requests for Reconfig retry semantics.
 
-### ISSUE-2026-012 — netmapcache: Removed peer digest suppresses an identical re-add
+### ISSUE-2026-012 — netmapcache: Missing values retain digests that suppress repair
 
 - Status: Hold.
 - Delivery mode: Undecided.
 - Location: Not published.
-- Evidence class: Source-proven; startup impact not measured.
+- Evidence class: Observed and source-proven; production startup impact not measured.
 - Internal priority: High.
 - Confidence: High.
 - Type: Persistence and state.
 - Publication target: Undecided.
-- Summary: `UpdatePeers` removes stored peer values but retains their `lastWrote` digests.
-  Missing Store values retain the same stale digests, and the LocalBackend caller resolves removed peers too late.
-- Evidence: `ipn/ipnlocal/netmapcache/netmapcache.go:81-105` skips writes on digest equality.
-  Lines 253-281 remove Store keys without invalidating `lastWrote`.
-  Lines 333-337 and 411-423 retain digests after missing-key reads.
-  `ipn/ipnlocal/local.go:2565-2569` looks up removed NodeIDs after applying the delta.
-- Shared change pressure: Not a DRY finding; cache values, digests, and removed-peer identity have one consistency owner.
-- Impact: Source proves that `Load` can omit a peer after a remove and identical re-add sequence.
-  The current caller can also fail to send peer removals to the disk cache.
+- Summary: `Cache` retains `lastWrote` digests after explicit removal and missing-value reads.
+  A later identical write is then suppressed even though the Store value no longer exists.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `ipn/ipnlocal/netmapcache/netmapcache.go:81-105` skips writes on digest equality.
+  Lines 253-281 remove peer values without invalidating their digests.
+  Lines 333-337 and 411-423 retain digests after missing self and ordinary values.
+  A FileStore remove and identical peer re-add omitted the peer on `Load`.
+  Removing `self`, loading, and storing the identical map left the cache unavailable.
+  Removing `dns`, loading, and storing the identical map left DNS absent.
+  Merged pull requests #20111 and #20132 introduced and released `UpdatePeers`.
+  Focused searches found no matching issue or active pull request.
+- Shared change pressure: Store values and their write-suppression digests share one `Cache` consistency owner.
+- Impact: A missing value can remain missing after an apparently successful identical Store or peer re-add.
   Production sequence frequency and startup impact are not measured.
-- Proposed direction: Capture removed StableIDs before applying the delta.
-  Delete `lastWrote[key]` on explicit removal and every missing-key path, including the self value.
-- Risks and boundaries: Preserve write suppression for unchanged values that remain in the Store.
-  Invalidate the digest even when removal is uncertain so a later write can repair storage.
-- Verification: Store a map, remove a peer, re-add identical content, and load the cache.
-  Cover missing peer and self values plus the production delta caller.
-- Missing publication evidence: Record the exact current `upstream/main` revision and reproduce with FileStore.
-  Search prior netmap cache delta issues and pull requests.
+- Proposed direction: Invalidate `lastWrote[key]` after every explicit peer-removal attempt.
+  Invalidate the corresponding digest whenever `Load` observes a missing self or ordinary value.
+- Risks and boundaries: Preserve write suppression for unchanged values known to remain in the Store.
+  Removal errors leave Store state uncertain, so invalidation may cause one safe repair write.
+- Verification: Focused overlays reproduced peer re-add, missing self, and missing DNS failures.
+  Invalidating the three digest paths made `TestUpdatePeers` and `TestInvalidCache` pass.
+- Missing publication evidence: Delivery mode, exact external target, and exact draft remain user decisions.
 
-### ISSUE-2026-013 — k8s-operator: Unavailable ProxyGroup falls through to valid
+### ISSUE-2026-013 — k8s-operator: Unavailable ProxyGroup fallthrough is intentional
 
-- Status: Hold.
+- Status: Rejected.
 - Delivery mode: Undecided.
 - Location: Not published.
-- Evidence class: Source-proven; cluster impact not measured.
-- Internal priority: High.
+- Evidence class: Source-proven false positive with verified design history.
+- Internal priority: Low.
 - Confidence: High.
 - Type: Validation and state.
 - Publication target: Undecided.
-- Summary: Egress validation sets `EgressSvcValid` to Unknown when a ProxyGroup is unavailable.
-  It then falls through, overwrites the condition with True, and permits provisioning.
-- Evidence: `cmd/k8s-operator/egress-services.go:572-575` owns the unavailable branch.
-  Lines 577-579 unconditionally set valid True and return `true`.
-- Shared change pressure: Not a DRY finding; one validator has a missing terminal branch.
-- Impact: Source proves internally contradictory status and premature provisioning eligibility.
-  Cluster occurrence frequency is not measured.
-- Proposed direction: Return `false, nil` immediately after applying the unavailable conditions.
-- Risks and boundaries: Preserve requeue through the existing ProxyGroup watch.
-  Do not change invalid, missing, or retrieval-error branches.
-- Verification: Reconcile an Egress Service with an existing unavailable ProxyGroup.
-  Confirm no child provisioning and no overwrite of Unknown with True.
-- Missing publication evidence: Verify current `upstream/main` and reproduce with a fake Kubernetes client.
-  Search prior ProxyGroup availability issues and pull requests.
+- Summary: The candidate treated unavailable-ProxyGroup fallthrough as a missing terminal branch.
+  History proves that provisioning while unavailable was introduced deliberately.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `cmd/k8s-operator/egress-services.go:572-579` overwrites Unknown with True and returns `true`.
+  Commit `b406f209c` and pull request #14436 deliberately removed the earlier `return false, nil`.
+  That change provisions health-check-enabled Egress resources needed by the pre-shutdown design.
+  `TestTailscaleEgressServices` provisions successfully with a ProxyGroup lacking an Available condition.
+  The focused test passes on current `upstream/main`.
+- Shared change pressure: Not a DRY finding; the proposed terminal branch conflicts with established provisioning ownership.
+- Impact: The recorded fix would block required Egress resource creation before ProxyGroup availability.
+  The intermediate condition assignments may be redundant, but they do not prove premature provisioning.
+- Proposed direction: No change while rejected.
+  Reopen only if a separate persisted-condition defect is reproduced without blocking intended provisioning.
+- Risks and boundaries: Preserve the pre-shutdown health-check resources introduced by pull request #14436.
+  Do not infer invalid provisioning solely from the overwritten in-memory condition.
+- Verification: History review and the existing unavailable-ProxyGroup fixture disprove the proposed terminal return.
+- Missing publication evidence: No publication is warranted because the proposed root cause and fix are disproven.
 
 ### ISSUE-2026-014 — k8s-operator: EndpointSlice recovery depends on a status transition
 
@@ -397,26 +410,30 @@ Next finding ID: ISSUE-2026-074
 - Status: Hold.
 - Delivery mode: Undecided.
 - Location: Not published.
-- Evidence class: Source-proven; user impact not measured.
+- Evidence class: Observed and source-proven; user frequency not measured.
 - Internal priority: High.
 - Confidence: High.
 - Type: State and error.
 - Publication target: Undecided.
 - Summary: Declarative `get-config`, `set-config`, and `clear` dereference a nil `ServeConfig`.
   Other Serve paths establish nil as the normal no-configuration state.
-- Evidence: `cmd/tailscale/cli/serve_v2.go:633-637`, 665-802, and 883-896 dereference the result.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `cmd/tailscale/cli/serve_v2.go:633-637`, 665-802, and 883-896 dereference the result.
   `cmd/tailscale/cli/serve_v2.go:445-448` and `serve_status.go:20-23` normalize or accept nil.
-- Shared change pressure: Three commands consume the same empty-state contract without its existing normalization.
-- Impact: Source proves first-use panics or nil dereferences when no Serve configuration exists.
+  A LocalClient fixture returning nil reproduced independent panics in `clear`, `get-config`, and `set-config`.
+  Pull requests #16509 and #17435 introduced `clear` and the declarative config commands.
+  Focused searches found no matching issue or active pull request.
+- Shared change pressure: Three commands consume the same empty-state contract without its established normalization.
+- Impact: First-use invocations can panic when no Serve configuration exists.
   User frequency is not measured.
-- Proposed direction: Normalize nil immediately after each `GetServeConfig`.
-  Treat `clear` with no config as a no-op.
-- Risks and boundaries: Preserve the ability of `set-config` to create a new empty-backed configuration.
-  Avoid unnecessary writes from `clear`.
-- Verification: Run all three commands with a LocalClient returning nil ServeConfig.
-  Confirm no panic and the expected empty or no-op result.
-- Missing publication evidence: Verify current `upstream/main` and reproduce all three commands.
-  Search current Serve config issues and pull requests.
+- Proposed direction: Treat nil as a no-op in `clear`.
+  Normalize nil to an empty `ServeConfig` in `get-config` and `set-config`.
+- Risks and boundaries: `clear` must not perform an unnecessary write for an absent configuration.
+  `get-config` must emit the established empty representation.
+  `set-config` must be able to create the first configuration.
+- Verification: The current source panicked independently in all three fixture cases.
+  A source overlay returned success, emitted `{}` for single-service `get-config`, avoided a clear write, and applied config.
+- Missing publication evidence: Delivery mode, exact external target, and exact draft remain user decisions.
 
 ### ISSUE-2026-017 — serve: Single-service Advertised false is not applied
 
@@ -741,24 +758,29 @@ Next finding ID: ISSUE-2026-074
 - Status: Hold.
 - Delivery mode: Undecided.
 - Location: Not published.
-- Evidence class: Source-proven; automation impact not measured.
+- Evidence class: Observed and source-proven; automation impact not measured.
 - Internal priority: Medium.
 - Confidence: High.
 - Type: Output.
 - Publication target: Undecided.
 - Summary: The status contract promises deterministic ordering, but node TCP entries range a Go map directly.
   Unchanged configurations can therefore produce reordered lines.
-- Evidence: `cmd/tailscale/cli/serve_status.go:26-33` documents deterministic ordering.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `cmd/tailscale/cli/serve_status.go:26-33` documents deterministic ordering.
   `cmd/tailscale/cli/serve_legacy.go:648-673` iterates `sc.TCP` without sorting.
-- Shared change pressure: Web and Service renderers already sort their map-owned output.
-  The node TCP renderer implements the same ordering policy differently.
-- Impact: Source proves unstable output ordering with multiple node TCP forwards.
+  Rendering one six-port configuration 128 times produced six distinct outputs.
+  Pull request #19600 introduced the deterministic status contract and sorted sibling renderers.
+  Focused searches found no matching issue or pull request.
+  Open pull request #20391 touches `serve_legacy.go` for an unrelated JSON warning.
+- Shared change pressure: Web, Service, and node TCP renderers share one deterministic output policy.
+- Impact: Identical configurations produce unstable human-readable status output.
   Parser and diff impact are not measured.
-- Proposed direction: Sort numeric TCP port keys before rendering.
-- Risks and boundaries: Preserve group ordering, line contents, and numeric rather than lexical order.
-- Verification: Render two or more ports repeatedly and require byte-identical ascending output.
-- Missing publication evidence: Verify current `upstream/main` and reproduce repeated output.
-  Search Serve status ordering issues and pull requests.
+- Proposed direction: Sort the numeric TCP port keys before rendering.
+- Risks and boundaries: Preserve group ordering and every rendered line.
+  Sort numerically rather than lexically.
+- Verification: Current source produced six output variants in 128 renderings.
+  A source overlay produced one byte-identical, numerically ascending result.
+- Missing publication evidence: Delivery mode, exact external target, and exact draft remain user decisions.
 
 ### ISSUE-2026-031 — k8s-operator: Stable Ingress status is written on every reconcile
 
@@ -1787,3 +1809,32 @@ Next finding ID: ISSUE-2026-074
 - Verification: Race Close with Start, scanner failure, retry sleep, and share replacement.
 - Missing publication evidence: Record the exact current `upstream/main` revision and reproduce lifecycle leaks.
   Search Drive and Taildrive child-process issues.
+
+### ISSUE-2026-074 — ipnlocal: Peer removal loses its StableNodeID before cache update
+
+- Status: Hold.
+- Delivery mode: Undecided.
+- Location: Not published.
+- Evidence class: Observed and source-proven; production startup impact not measured.
+- Internal priority: High.
+- Confidence: High.
+- Type: Persistence and state.
+- Publication target: Undecided.
+- Summary: `UpdateNetmapDelta` applies peer removal before resolving the removed peer's StableNodeID.
+  The updated node backend no longer contains the peer, so the disk cache receives no removal.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `ipn/ipnlocal/local.go:2441` applies mutations before the cache-removal lookup at lines 2565-2569.
+  A focused `TestUpdateNetMapCache` overlay removed peer 601 through `UpdateNetmapDelta`.
+  Reloading the production FileStore still returned the removed peer.
+  Pull requests #20111 and #20132 introduced and released the delta-cache update path.
+  Focused searches found no matching issue or active pull request.
+- Shared change pressure: One delta owner must preserve removed-peer identity until every downstream consumer uses it.
+- Impact: A peer removed by a delta can remain in the disk cache and reappear in cached startup state.
+  Production sequence frequency and startup impact are not measured.
+- Proposed direction: Capture StableNodeIDs after TKA mutation filtering and before applying the delta.
+  Continue resolving updated peer views after application, then pass both sets to `writePeerDeltaToDiskLocked`.
+- Risks and boundaries: TKA filtering can rewrite an upsert into a removal.
+  Capture identity after filtering, preserve update behavior, and avoid retaining full removed Node values.
+- Verification: The focused production-path fixture failed against current source.
+  Capturing StableNodeIDs before `cn.UpdateNetmapDelta` made the same fixture pass.
+- Missing publication evidence: Delivery mode, exact external target, and exact draft remain user decisions.
