@@ -210,14 +210,14 @@ Next finding ID: ISSUE-2026-075
 
 ### ISSUE-2026-009 — testwrapper: Shard discovery failures become successful skips
 
-- Status: Hold.
-- Delivery mode: Undecided.
+- Status: Drafted.
+- Delivery mode: Issue.
 - Location: Not published.
 - Evidence class: Observed and source-proven; CI occurrence frequency not measured.
 - Internal priority: High.
 - Confidence: High.
 - Type: Error and orchestration.
-- Publication target: Undecided.
+- Publication target: new issue.
 - Summary: `testsForShard` maps invalid shard specifications and `go list` failures to an empty result.
   `runTests` treats that result as a legitimately empty shard and reports the package as skipped.
 - Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
@@ -225,21 +225,29 @@ Next finding ID: ISSUE-2026-075
   Lines 278-286 convert a zero-length result into a successful skip.
   `TS_TEST_SHARD=bogus /tmp/testwrapper-repro ./cmd/testwrapper` exited zero and printed a skip.
   `TS_TEST_SHARD=1/2 /tmp/testwrapper-repro ./does-not-exist` did the same after `go list` failed.
+  `TS_TEST_SHARD=2/1` also exited zero and printed a skip for an out-of-range shard.
   `TS_TEST_SHARD=100000/100000` remained a successful skip for a valid empty shard.
+  JSON decode and source-read failures can return an empty or partial selection without an error.
   Issue #19886 and merged pull request #19887 introduced the current automatic sharding path.
-  Focused searches found no matching issue or active pull request.
+  Related testwrapper error-handling reports and fixes do not own this discovery-result root cause.
+  Focused issue, pull-request, and discussion searches found no exact duplicate or active competing fix.
 - Shared change pressure: Not a DRY finding; one discovery boundary conflates failure with valid emptiness.
-- Impact: Invalid configuration or failed discovery can omit sharded tests without a failing process status.
-  Occurrence frequency in current CI is not measured.
-- Proposed direction: Reject malformed and out-of-range shard specifications.
-  Use `CombinedOutput` for failed discovery and return an actionable non-`*exec.ExitError` diagnostic.
-  Preserve an empty successful result for a valid shard with no assigned tests.
-- Risks and boundaries: `runTests` special-cases wrapped `*exec.ExitError` values and can exit before logging them.
+- Impact: Invalid configuration or failed discovery can omit the package's sharded tests without a failing process status.
+  JSON or source-read failures can also omit a partial selection.
+  Current workflow shard values are valid, and occurrence frequency in CI is not measured.
+- Proposed direction: Reject malformed, out-of-range, and unsafe shard specifications.
+  Treat parsing, `go list`, JSON decoding, and source scanning as all-or-error discovery.
+  Reserve an empty successful result for a valid shard with no assigned tests.
+  Surface discovery diagnostics before exiting or deliberately reach the main `go test` fallback promised by the comment.
+- Risks and boundaries: `main` special-cases wrapped `*exec.ExitError` values and can exit before logging them.
+  Capturing output alone is insufficient unless the diagnostic is emitted before that exit.
   Preserve package-level fatal handling and do not turn a legitimate empty shard into a failure.
-- Verification: The current binary returned zero for invalid syntax and failed `go list`.
-  A source overlay returned non-zero with diagnostics for both failures.
+  Do not claim that every JSON or source-read failure produces an empty skip; partial selection is also possible.
+- Verification: The current binary returned zero for invalid syntax, an out-of-range shard, and failed `go list`.
+  A source overlay returned non-zero with diagnostics for those failure classes.
   The same overlay preserved success for a valid empty shard.
-- Missing publication evidence: Delivery mode, exact external target, and exact draft remain user decisions.
+- Missing publication evidence: Exact user approval of the completed bug-form draft and the official
+  `tailscale/tailscale` new-issue target.
 
 ### ISSUE-2026-010 — Makefile: SSH integration prerequisites and build failures are backgrounded
 
