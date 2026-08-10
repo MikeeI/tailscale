@@ -19,8 +19,7 @@ Reclassify effort when research changes the recorded scope.
 
 #### XS effort
 
-- `ISSUE-2026-003`, `ISSUE-2026-019`, `ISSUE-2026-020`, `ISSUE-2026-022`, `ISSUE-2026-023`, `ISSUE-2026-040`
-- `ISSUE-2026-101`, `ISSUE-2026-105`
+- `ISSUE-2026-003`, `ISSUE-2026-019`, `ISSUE-2026-020`, `ISSUE-2026-023`, `ISSUE-2026-040`, `ISSUE-2026-105`
 
 #### S effort
 
