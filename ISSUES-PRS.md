@@ -664,18 +664,24 @@ Reclassify effort when research changes the recorded scope.
 
 ### ISSUE-2026-022 — cli: Inaccessible KUBECONFIG path can panic
 
-- Status: Hold.
-- Delivery mode: Undecided.
+- Status: Ready.
+- Delivery mode: Pull request.
 - Location: Not published.
-- Evidence class: Source-proven; user impact not measured.
+- Evidence class: Observed and source-proven; user frequency not measured.
 - Internal priority: High.
 - Confidence: High.
 - Type: Error and filesystem.
-- Publication target: Undecided.
+- Publication target: new pull request.
 - Summary: `kubeconfigPath` dereferences `FileInfo` after any non-ENOENT `os.Stat` result.
   Permission and other access errors can return a nil `FileInfo` and trigger a panic.
-- Evidence: `cmd/tailscale/cli/configure-kube.go:54-63` owns path selection and the unsafe dereference.
+- Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
+  `cmd/tailscale/cli/configure-kube.go:54-63` owns path selection and the unsafe dereference.
   `cmd/tailscale/cli/configure-kube.go:80-103` already owns actionable access-error reporting.
+  A `KUBECONFIG` symlink loop made `os.Stat` return `ELOOP` with a nil `FileInfo`.
+  The focused existing `TestCheckKubeconfigWritable/unwritable-dir` reproduced the panic at line 59.
+  Pull request #11604 introduced the list selection, while #20009 added the later writability check.
+  Issue #20007 and focused issue and pull-request searches found no same-root duplicate.
+  Branch `pr/issue-2026-022-kubeconfig-stat` commit `2ddcd8161` is pushed to `origin`.
 - Shared change pressure: Not a DRY finding; path selection bypasses the existing error boundary.
 - Impact: Source proves a panic path for inaccessible KUBECONFIG entries.
   User frequency is not measured.
@@ -683,10 +689,11 @@ Reclassify effort when research changes the recorded scope.
   Preserve list precedence and let `checkKubeconfigWritable` report access failures.
 - Risks and boundaries: Keep existing behavior for nonexistent entries and multi-path KUBECONFIG values.
   Do not silently choose a different writable file after an access error.
-- Verification: Exercise a denied parent, a nonexistent entry, a directory, and a normal file.
-  Confirm no panic and unchanged path precedence.
-- Missing publication evidence: Verify current `upstream/main` and reproduce as an unprivileged user.
-  Search prior kubeconfig path issues and pull requests.
+- Verification: Before the fix, the focused existing subtest panicked on the `ELOOP` path.
+  After the fix, `./tool/go test ./cmd/tailscale/cli -run '^TestCheckKubeconfigWritable$' -count=1` passed.
+  The test preserves the non-root unwritable-directory check and confirms the failing list entry remains selected.
+- Missing publication evidence: The exact upstream pull-request draft and target await user approval.
+  `.github/CONTRIBUTING.md` asks contributors to file bugs first, and no exact public bug owns this root cause.
 
 ### ISSUE-2026-023 — exit-node: Listing can panic on a peer without an address
 
@@ -2572,27 +2579,33 @@ Reclassify effort when research changes the recorded scope.
 
 ### ISSUE-2026-101 — controlbase: Port range ending at 65535 continues after counter overflow
 
-- Status: Hold.
-- Delivery mode: Undecided.
+- Status: Ready.
+- Delivery mode: Pull request.
 - Location: Not published.
-- Evidence class: Source-proven contract violation; production impact not measured.
+- Evidence class: Observed and source-proven; production frequency not measured.
 - Internal priority: High.
 - Confidence: High.
 - Type: CLI correctness.
-- Publication target: Undecided.
+- Publication target: new pull request.
 - Summary: Every port in a closed range must be applied exactly once and configuration must terminate.
   A `uint16` counter wraps from 65535 to zero and continues.
 - Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
   The affected code is at `cmd/tailscale/cli/serve_v2.go:934-956`.
   File and Unix targets accept the wrapped values without an error that stops the loop.
+  The existing `TestRunServeSetConfig/new_format_all_no_warning` fixture now applies `tcp:65535` to a Unix target.
+  Before the fix, its focused command timed out after eight seconds with exit status 124.
+  Pull request #17435 introduced the range loop, and #19684 later added the exercised Unix target path.
+  Focused issue and pull-request searches found no same-root duplicate or active competing fix.
+  Branch `pr/issue-2026-101-serve-port-range` commit `420171202` is pushed to `origin`.
 - Shared change pressure: Not a DRY finding; Serve port-range iteration is the single decision owner.
 - Impact: Source proves that valid Serve configurations can block the CLI process indefinitely.
   Production frequency and scale are unmeasured.
 - Proposed direction: Widen the counter, or break explicitly after processing `Last`.
 - Risks and boundaries: Preserve closed-range semantics at the `uint16` boundary without duplicate ports.
-- Verification: Apply `tcp:65535` to a valid file target; the command must finish after one application.
-- Missing publication evidence: Reproduce the focused failure on the recorded current revision.
-  Search prior controlbase issues and pull requests for the same root cause.
+- Verification: `./tool/go test ./cmd/tailscale/cli -run '^TestRunServeSetConfig$' -count=1` passed.
+  The focused maximal-port fixture applies TCP port 65535 once and returns instead of wrapping to zero.
+- Missing publication evidence: The exact upstream pull-request draft and target await user approval.
+  `.github/CONTRIBUTING.md` asks contributors to file bugs first, and no exact public bug owns this root cause.
 
 ### ISSUE-2026-102 — netstack: Late port mapping survives Close and local port changes
 
