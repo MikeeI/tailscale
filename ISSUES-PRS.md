@@ -664,9 +664,9 @@ Reclassify effort when research changes the recorded scope.
 
 ### ISSUE-2026-022 — cli: Inaccessible KUBECONFIG path can panic
 
-- Status: Ready.
+- Status: Published.
 - Delivery mode: Pull request.
-- Location: Not published.
+- Location: https://github.com/tailscale/tailscale/pull/20799
 - Evidence class: Observed and source-proven; user frequency not measured.
 - Internal priority: High.
 - Confidence: High.
@@ -692,8 +692,8 @@ Reclassify effort when research changes the recorded scope.
 - Verification: Before the fix, the focused existing subtest panicked on the `ELOOP` path.
   After the fix, `./tool/go test ./cmd/tailscale/cli -run '^TestCheckKubeconfigWritable$' -count=1` passed.
   The test preserves the non-root unwritable-directory check and confirms the failing list entry remains selected.
-- Missing publication evidence: The exact upstream pull-request draft and target await user approval.
-  `.github/CONTRIBUTING.md` asks contributors to file bugs first, and no exact public bug owns this root cause.
+- Missing publication evidence: None.
+  Published as https://github.com/tailscale/tailscale/pull/20799 after exact draft and target approval.
 
 ### ISSUE-2026-023 — exit-node: Listing can panic on a peer without an address
 
@@ -2579,9 +2579,9 @@ Reclassify effort when research changes the recorded scope.
 
 ### ISSUE-2026-101 — controlbase: Port range ending at 65535 continues after counter overflow
 
-- Status: Ready.
+- Status: Published.
 - Delivery mode: Pull request.
-- Location: Not published.
+- Location: https://github.com/tailscale/tailscale/pull/20798
 - Evidence class: Observed and source-proven; production frequency not measured.
 - Internal priority: High.
 - Confidence: High.
@@ -2604,8 +2604,8 @@ Reclassify effort when research changes the recorded scope.
 - Risks and boundaries: Preserve closed-range semantics at the `uint16` boundary without duplicate ports.
 - Verification: `./tool/go test ./cmd/tailscale/cli -run '^TestRunServeSetConfig$' -count=1` passed.
   The focused maximal-port fixture applies TCP port 65535 once and returns instead of wrapping to zero.
-- Missing publication evidence: The exact upstream pull-request draft and target await user approval.
-  `.github/CONTRIBUTING.md` asks contributors to file bugs first, and no exact public bug owns this root cause.
+- Missing publication evidence: None.
+  Published as https://github.com/tailscale/tailscale/pull/20798 after exact draft and target approval.
 
 ### ISSUE-2026-102 — netstack: Late port mapping survives Close and local port changes
 
