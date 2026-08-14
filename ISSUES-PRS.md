@@ -2591,18 +2591,20 @@ Reclassify effort when research changes the recorded scope.
 - Evidence: Current `upstream/main` is `e1e5325c22a46a9df2e76d725f01f92065885138`.
   The affected code is at `cmd/tailscale/cli/serve_v2.go:934-956`.
   File and Unix targets accept the wrapped values without an error that stops the loop.
-  The existing `TestRunServeSetConfig/new_format_all_no_warning` fixture now applies `tcp:65535` to a Unix target.
-  Before the fix, its focused command timed out after eight seconds with exit status 124.
+  Before the fix, a focused Unix-target fixture using `tcp:65535` timed out after eight seconds with exit status 124.
+  Upstream issue #20873 independently reproduces the wrap as `invalid port "0"` with an HTTP target.
   Pull request #17435 introduced the range loop, and #19684 later added the exercised Unix target path.
   Focused issue and pull-request searches found no same-root duplicate or active competing fix.
-  Branch `pr/issue-2026-101-serve-port-range` commit `420171202` is pushed to `origin`.
+  Reviewer feedback restored `new_format_all_no_warning` and moved the boundary case into the dedicated
+  `TestRunServeSetConfig/max_port_does_not_wrap` regression subtest.
+  Branch `pr/issue-2026-101-serve-port-range` commit `9d86de022` is pushed to `origin`.
 - Shared change pressure: Not a DRY finding; Serve port-range iteration is the single decision owner.
 - Impact: Source proves that valid Serve configurations can block the CLI process indefinitely.
   Production frequency and scale are unmeasured.
-- Proposed direction: Widen the counter, or break explicitly after processing `Last`.
+- Proposed direction: Break explicitly after processing `Last`.
 - Risks and boundaries: Preserve closed-range semantics at the `uint16` boundary without duplicate ports.
-- Verification: `./tool/go test ./cmd/tailscale/cli -run '^TestRunServeSetConfig$' -count=1` passed.
-  The focused maximal-port fixture applies TCP port 65535 once and returns instead of wrapping to zero.
+- Verification: `./tool/go test ./cmd/tailscale/cli -run '^TestRunServeSetConfig$' -count=1` passed after review updates.
+  The dedicated maximal-port subtest applies the HTTP handler at TCP port 65535 and returns instead of wrapping to zero.
 - Missing publication evidence: None.
   Published as https://github.com/tailscale/tailscale/pull/20798 after exact draft and target approval.
 
